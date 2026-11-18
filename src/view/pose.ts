@@ -31,6 +31,8 @@ export const LEG_POSES = {
 };
 
 const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+/** 踏み切り前に腕を後ろへ引いた角度 */
+const ARM_BACK = -PI * 0.38;
 const smooth = (k: number) => {
   const c = Math.min(1, Math.max(0, k));
   return c * c * (3 - 2 * c);
@@ -91,7 +93,7 @@ export function targetJoints(pl: PlayerFrame, runPhase: number): Joints {
       // 踏み込み：沈み込む
       const c = smooth(k);
       leg = { thigh: mix(LEG_POSES.ready.thigh, LEG_POSES.prep.thigh, c), knee: mix(LEG_POSES.ready.knee, LEG_POSES.prep.knee, c), lean: mix(LEG_POSES.ready.lean, LEG_POSES.prep.lean, c) };
-      if (!arms) arms = [mix(PI * 0.12, -PI * 0.25, c), mix(PI * 0.12, -PI * 0.25, c)];
+      if (!arms) arms = [ARM_BACK, ARM_BACK];
     } else if (pl.jumpPhase === 'air') {
       // 空中：踏み切りで伸びて → 脚をたたむ → 着地に向けて伸ばす
       const fold = Math.sin(PI * k);
@@ -109,14 +111,22 @@ export function targetJoints(pl: PlayerFrame, runPhase: number): Joints {
     thighN = leg.thigh; kneeN = leg.knee; thighF = leg.thigh - 0.15; kneeF = leg.knee; lean = leg.lean;
   } else if (pl.speed > 0.5) {
     // 移動：脚を交互に振る。速いほど大きく
-    const a = Math.min(1, pl.speed / 4.5);
+    const a = Math.min(1.2, pl.speed / 4.5);
     const s = Math.sin(runPhase);
     thighN = 0.3 + 0.75 * a * s;
     thighF = 0.3 - 0.75 * a * s;
     kneeN = 0.45 + 1.1 * a * Math.max(0, -Math.cos(runPhase + 0.4));
     kneeF = 0.45 + 1.1 * a * Math.max(0, Math.cos(runPhase + 0.4));
     lean = 0.15 + 0.2 * a;
-    if (!arms) arms = [PI * 0.1 - 0.7 * a * s, PI * 0.1 + 0.7 * a * s];
+    if (!arms) {
+      const swing: [number, number] = [PI * 0.1 - 0.7 * a * s, PI * 0.1 + 0.7 * a * s];
+      if (pl.moveKind === 'approach') {
+        // 助走の後半は、踏み切りに向けて両腕を後ろへ大きく引く
+        const back = smooth((pl.moveT - 0.55) / 0.45);
+        arms = [mix(swing[0], ARM_BACK, back), mix(swing[1], ARM_BACK, back)];
+        lean += 0.15 * back;
+      } else arms = swing;
+    }
   } else {
     thighN = leg.thigh; kneeN = leg.knee; thighF = leg.thigh - 0.1; kneeF = leg.knee; lean = leg.lean;
   }

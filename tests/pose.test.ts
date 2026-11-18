@@ -4,7 +4,7 @@ import { hipHeight, targetJoints } from '../src/view/pose';
 
 const base: PlayerFrame = {
   id: 'p', team: 'A', number: 1, role: 'OH', height: 1.85, x: 0, y: 0, z: 0,
-  pose: 'ready', poseT: 0, speed: 0, jumpPhase: 'none', jumpT: 0,
+  pose: 'ready', poseT: 0, speed: 0, vx: 0, vy: 0, ax: 0, ay: 0, moveKind: 'none', moveT: 0, jumpPhase: 'none', jumpT: 0,
 };
 const L = 1.85 * 0.47 / 2;
 

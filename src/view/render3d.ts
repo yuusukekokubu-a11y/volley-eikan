@@ -20,7 +20,7 @@ const BODY = {
   thighR: 0.085,
   shinR: 0.06,
   hipHalfW: 0.1,    // 腰の中心から脚の付け根までの横幅
-  armLenRatio: 0.34,
+  armLenRatio: 0.43,
 };
 
 interface PlayerMesh {
@@ -38,6 +38,13 @@ interface PlayerMesh {
   shin: number;
   joints?: Joints;
   runPhase: number;
+  head: THREE.Group;
+  armLen: number;
+  /** 体の向き（世界座標の xy での角度） */
+  yaw: number;
+  hipY?: number;
+  /** 待機中の揺れの位相（選手ごとにずらす） */
+  idle: number;
 }
 
 /** 関節の動きを目標に寄せる速さ（1秒あたり） */
@@ -108,7 +115,7 @@ export class Render3D {
         this.players.set(pl.id, m);
         this.scene.add(m.root, m.shadow);
       }
-      updatePlayer(m, pl, snap ? 0 : dt);
+      updatePlayer(m, pl, snap ? 0 : dt, fr);
     }
     for (const [id, m] of this.players) {
       if (!seen.has(id)) {
@@ -259,32 +266,135 @@ function makePlayer(pl: PlayerFrame): PlayerMesh {
   shadow.rotation.x = -Math.PI / 2;
 
   // 向き：A は +x、B は -x を向く（体の前が +x になるように作ってある）
-  root.rotation.y = pl.team === 'A' ? 0 : Math.PI;
+  const yaw = pl.team === 'A' ? 0 : Math.PI;
+  root.rotation.y = yaw;
+  let idle = 0;
+  for (const ch of pl.id) idle = (idle * 31 + ch.charCodeAt(0)) % 1000;
   return {
+    head, armLen, yaw, idle: idle / 159,
     root, pitch, upper, armN, armF, thighN: ln.hip, kneeN: ln.knee, thighF: lf.hip, kneeF: lf.knee, shadow,
     thigh, shin, runPhase: 0,
   };
 }
 
-function updatePlayer(m: PlayerMesh, pl: PlayerFrame, dt: number) {
-  // 走る脚の振りは、進んだ距離で位相を進める（歩幅 約1.6m で1周）
-  m.runPhase += (pl.speed * dt * Math.PI * 2) / 1.6;
+/** 体の向きを目標に寄せる速さ（1秒あたり） */
+const FACE_RATE = 9;
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const DOWN = new THREE.Vector3(0, -1, 0);
+const tmpV = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion();
+const tmpE = new THREE.Euler();
+
+/** 体の向き：動作の向き → 速く走っている時は進む方向 → それ以外はボールの方 */
+function desiredYaw(m: PlayerMesh, pl: PlayerFrame, fr: Frame): number {
+  const forward = pl.team === 'A' ? 0 : Math.PI;
+  const toward = (x: number, y: number) => Math.atan2(y - pl.y, x - pl.x);
+  if (pl.faceTo) {
+    const a = toward(pl.faceTo.x, pl.faceTo.y);
+    // 受けるボールには少しだけ横を向く（体は相手コート寄りのまま）
+    if (pl.pose === 'receive' || pl.pose === 'dig' || pl.pose === 'cover') return forward + wrap(a - forward) * 0.55;
+    return a;
+  }
+  if (pl.speed > 2.0) return Math.atan2(pl.vy, pl.vx);
+  if (fr.ballVisible && Math.hypot(fr.ball.x - pl.x, fr.ball.y - pl.y) > 0.5) return toward(fr.ball.x, fr.ball.y);
+  return m.yaw;
+}
+
+function updatePlayer(m: PlayerMesh, pl: PlayerFrame, dt: number, fr: Frame) {
+  // 走る脚の振り：進んだ距離で位相を進める。速いほど歩幅が大きい
+  const stride = 0.55 + 0.17 * pl.speed;
+  m.runPhase += (pl.speed * dt * Math.PI) / stride;
   const target = targetJoints(pl, m.runPhase);
-  m.joints = !m.joints || dt === 0 ? target : blendJoints(m.joints, target, 1 - Math.exp(-BLEND_RATE * dt));
-  const j = m.joints;
+  const k = 1 - Math.exp(-BLEND_RATE * dt);
+  m.joints = !m.joints || dt === 0 ? target : blendJoints(m.joints, target, k);
+  const j = { ...m.joints };
+
+  // 体の向き
+  const want = desiredYaw(m, pl, fr);
+  m.yaw = dt === 0 ? want : m.yaw + wrap(want - m.yaw) * (1 - Math.exp(-FACE_RATE * dt));
+  m.root.rotation.y = m.yaw;
+  const cos = Math.cos(m.yaw), sin = Math.sin(m.yaw);
+
+  // 加速で前傾、減速で後ろに重心。横への加速では内側へ傾く
+  const fwdAcc = pl.ax * cos + pl.ay * sin;
+  const sideAcc = -pl.ax * sin + pl.ay * cos; // 左（世界 y 側）が＋
+  let lean = j.lean + clampN(fwdAcc * 0.05, -0.32, 0.32);
+  const roll = clampN(sideAcc * 0.035, -0.2, 0.2);
+
+  // 待機中もわずかに重心を揺らす
+  const still = pl.pose === 'ready' && pl.speed < 0.3 && pl.jumpPhase === 'none';
+  if (still) {
+    const ph = fr.t * 1.7 + m.idle;
+    lean += 0.03 * Math.sin(ph);
+    const bob = 0.07 * Math.sin(fr.t * 2.3 + m.idle * 1.3);
+    j.kneeN += bob; j.kneeF += bob; j.thighN += bob * 0.5; j.thighF += bob * 0.5;
+  }
+
+  // 腰の高さ：床では低い方の足が床に着く。空中では脚をたたんでも腰の高さは保つ（跳んだ分だけ上がる）
+  const hipTarget = pl.jumpPhase === 'air' ? m.thigh + m.shin : hipHeight(j, m.thigh, m.shin);
+  m.hipY = m.hipY === undefined || dt === 0 ? hipTarget : m.hipY + (hipTarget - m.hipY) * (1 - Math.exp(-BLEND_RATE * 1.5 * dt));
 
   m.root.position.copy(v3(pl.x, pl.y, pl.z));
-  m.pitch.position.y = hipHeight(j, m.thigh, m.shin);
+  m.pitch.position.y = m.hipY;
+  if (still) m.pitch.position.z = 0.015 * Math.sin(fr.t * 1.1 + m.idle);
   // Three.js の z 軸まわりの回転は、＋で体の前（+x）から上へ。前へ倒すのはマイナス
   m.pitch.rotation.z = -j.pitch;
-  m.upper.rotation.z = -j.lean;
   m.thighN.rotation.z = j.thighN;
   m.kneeN.rotation.z = -j.kneeN;
   m.thighF.rotation.z = j.thighF;
   m.kneeF.rotation.z = -j.kneeF;
+
+  // 上体：前傾・横への傾き・ボールの方へのひねり
+  let twist = 0;
+  if (fr.ballVisible) {
+    const rel = wrap(Math.atan2(fr.ball.y - pl.y, fr.ball.x - pl.x) - m.yaw);
+    twist = clampN(rel * 0.3, -0.45, 0.45);
+  }
+  // Three.js の y 軸まわりは +x から -z（世界の +y）へ回るので、世界の左向きが＋
+  m.upper.rotation.set(-roll, twist, -lean);
   // 腕は上体の前傾を打ち消して、体の向きに対する角度にする
-  m.armN.rotation.z = j.armN + j.lean;
-  m.armF.rotation.z = j.armF + j.lean;
+  m.armN.rotation.set(0, 0, j.armN + lean);
+  m.armF.rotation.set(0, 0, j.armF + lean);
+  m.armN.scale.y = 1;
+  m.armF.scale.y = 1;
+
+  m.root.updateMatrixWorld(true);
+
+  // 頭はボールを目で追う
+  if (fr.ballVisible) {
+    const b = m.upper.worldToLocal(v3(fr.ball.x, fr.ball.y, fr.ball.z));
+    const d = b.sub(m.head.position);
+    const hy = clampN(Math.atan2(-d.z, d.x), -1.1, 1.1);
+    const hp = clampN(Math.atan2(d.y, Math.hypot(d.x, d.z)), -0.7, 0.9);
+    m.head.rotation.set(0, hy, hp);
+  }
+
+  // 触る瞬間：腕の向きを、肩から触る点への向きで決める（手がボールの位置に来る）
+  const c = pl.contact;
+  if (c && c.w > 0.001) {
+    const tWorld = v3(c.pos.x, c.pos.y, c.pos.z);
+    const local = m.upper.worldToLocal(tWorld.clone());
+    const reachArm = (arm: THREE.Group, sideOffset: number) => {
+      const goal = local.clone();
+      goal.z += sideOffset;
+      tmpV.copy(goal).sub(arm.position);
+      const dist = tmpV.length();
+      if (dist < 1e-4) return;
+      const qIK = new THREE.Quaternion().setFromUnitVectors(DOWN, tmpV.normalize());
+      tmpQ.setFromEuler(tmpE.copy(arm.rotation));
+      arm.quaternion.copy(tmpQ.slerp(qIK, c.w));
+      // 届かない・余る分は腕の長さで少しだけ合わせる
+      const stretch = clampN(dist / m.armLen, 0.75, 1.22);
+      arm.scale.y = 1 + (stretch - 1) * c.w;
+    };
+    if (c.hands === 'hit') reachArm(m.armN, 0);
+    else {
+      const spread = c.action === 'block' ? 0.18 : c.action === 'set' ? 0.08 : 0.04;
+      reachArm(m.armN, spread);
+      reachArm(m.armF, -spread);
+    }
+  }
 
   m.shadow.position.copy(v3(pl.x, pl.y, 0.01));
   const s = 1 - Math.min(0.4, pl.z * 0.3);
