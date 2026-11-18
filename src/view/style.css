@@ -1,0 +1,67 @@
+:root {
+  --bg: #1d2733;
+  --panel: rgba(15, 22, 30, 0.72);
+  --text: #f4f6f8;
+  --red: #ff6b6b;
+  --blue: #6ea8ff;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#app { position: fixed; inset: 0; }
+#views { position: absolute; inset: 0; display: flex; }
+.view { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.view canvas { display: block; }
+.view.hidden { display: none; }
+.view .tag {
+  position: absolute; left: 8px; bottom: 8px;
+  padding: 2px 8px; border-radius: 6px;
+  background: var(--panel); font-size: 13px; font-weight: 700;
+}
+#views.split .view + .view { border-left: 2px solid #000; }
+#hud {
+  position: absolute; left: 0; right: 0; top: 0;
+  display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px;
+  pointer-events: none;
+}
+#score {
+  background: var(--panel); border-radius: 8px; padding: 4px 10px;
+  font-size: 18px; white-space: nowrap;
+}
+#score .a { color: var(--red); font-weight: 700; }
+#score .b { color: var(--blue); font-weight: 700; }
+#msg {
+  background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 14px;
+  opacity: 0; transition: opacity 0.2s;
+}
+#msg.show { opacity: 1; }
+#info { position: absolute; left: 8px; top: 46px; background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.4; }
+#info:empty { display: none; }
+#controls {
+  position: absolute; right: 8px; top: 6px;
+  display: flex; gap: 6px;
+}
+#controls button {
+  min-width: 52px; height: 44px; padding: 0 10px;
+  border: 0; border-radius: 10px;
+  background: var(--panel); color: var(--text);
+  font-size: 15px; font-weight: 700;
+}
+#controls button:active { background: rgba(80, 100, 130, 0.9); }
+#portrait {
+  display: none; position: absolute; inset: 0;
+  align-items: center; justify-content: center;
+  background: var(--bg); font-size: 20px;
+}
+@media (orientation: portrait) and (max-width: 700px) {
+  #portrait { display: flex; }
+}

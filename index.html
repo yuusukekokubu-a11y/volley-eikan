@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>描画の比較（2D / 3D）</title>
+    <link rel="stylesheet" href="/src/view/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="views">
+        <div class="view" id="view2d"><canvas></canvas><span class="tag">2D</span></div>
+        <div class="view" id="view3d"><canvas></canvas><span class="tag">3D</span></div>
+      </div>
+      <div id="hud">
+        <div id="score"><span class="a">赤</span> <b id="sa">0</b> - <b id="sb">0</b> <span class="b">青</span></div>
+        <div id="msg"></div>
+        <div id="info"></div>
+      </div>
+      <div id="controls">
+        <button id="btnPlay">❚❚</button>
+        <button id="btnSpeed">1倍</button>
+        <button id="btnNext">次へ</button>
+        <button id="btnMode">並べる</button>
+        <button id="btnGender">男子</button>
+      </div>
+      <div id="portrait">横向きにしてください</div>
+    </div>
+    <script type="module" src="/src/view/main.ts"></script>
+  </body>
+</html>
