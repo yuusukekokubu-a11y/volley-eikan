@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>試合前画面</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 844px; height: 390px; box-sizing: border-box; background: #111827; color: #f9fafb; font-family: 'Noto Sans JP', sans-serif; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="height: 36px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #374151; font-size: 13px">
+<div style="display: flex; gap: 12px; align-items: center">
+<span style="color: #9ca3af">春高 県予選 準決勝</span>
+<span style="font-weight: 700">自校 vs 青嵐高校</span>
+</div>
+<span style="color: #9ca3af; font-size: 12px">5セットマッチ</span>
+</div>
+
+<div style="flex: 1; display: flex; min-height: 0">
+
+<div style="width: 300px; flex-shrink: 0; padding: 8px 12px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; border-right: 1px solid #374151">
+<div style="font-size: 12px; color: #9ca3af; display: flex; justify-content: space-between">
+<span>スタート時の並び（上がネット）</span>
+<span style="color: #fbbf24">{{selHint}}</span>
+</div>
+<div style="flex: 1; min-height: 0; background: #b7652b; border: 2px solid #f9fafb; border-radius: 4px; display: flex; flex-direction: column">
+<div style="height: 6px; background: #f9fafb; flex-shrink: 0"></div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 6px 6px 5px; border-bottom: 2px solid #f9fafb">
+<sc-for list="{{front}}" as="s" hint-placeholder-count="3">
+<button onClick="{{s.pick}}" style="{{s.style}}" aria-label="{{s.label}}">
+<span style="font-size: 10px; color: #d1d5db">{{s.posNo}}</span>
+<span style="font-size: 14px; font-weight: 700">{{s.no}} {{s.name}}</span>
+<span style="font-size: 10px; color: #93c5fd">{{s.role}} {{s.h}}cm</span>
+</button>
+</sc-for>
+</div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 5px 6px 6px">
+<sc-for list="{{back}}" as="s" hint-placeholder-count="3">
+<button onClick="{{s.pick}}" style="{{s.style}}" aria-label="{{s.label}}">
+<span style="font-size: 10px; color: #d1d5db">{{s.posNo}}</span>
+<span style="font-size: 14px; font-weight: 700">{{s.no}} {{s.name}}</span>
+<span style="font-size: 10px; color: #93c5fd">{{s.role}} {{s.h}}cm</span>
+</button>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 11px; color: #d1d5db">リベロ：7 中村（ミドルが後衛に下がると自動で交代）</div>
+</div>
+
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; gap: 4px; padding: 6px 10px 0; flex-shrink: 0" role="tablist">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button onClick="{{t.pick}}" style="{{t.style}}" role="tab">{{t.label}}</button>
+</sc-for>
+</div>
+<div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 8px">
+
+<sc-if value="{{isStarter}}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: 44px 26px 52px 30px 44px 40px 122px minmax(0, 1fr); gap: 4px; padding: 0 6px 4px; font-size: 11px; color: #9ca3af; border-bottom: 1px solid #4b5563">
+<span>区分</span><span>番</span><span>名前</span><span>ポジ</span><span>身長</span><span>調子</span>
+<span style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); text-align: center"><span>跳</span><span>力</span><span>速</span><span>技</span><span>ブ</span><span>体</span></span>
+<span>主な特能</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="11">
+<button onClick="{{r.pick}}" style="{{r.style}}" aria-label="{{r.label}}">
+<span style="color: {{r.whereColor}}; font-size: 11px">{{r.where}}</span>
+<span>{{r.no}}</span>
+<span style="font-weight: 500">{{r.name}}</span>
+<span style="color: #93c5fd">{{r.pos}}</span>
+<span>{{r.h}}cm</span>
+<span style="color: {{r.condColor}}">{{r.cond}}</span>
+<span style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); text-align: center">
+<sc-for list="{{r.grades}}" as="g" hint-placeholder-count="6"><span>{{g}}</span></sc-for>
+</span>
+<span style="color: #d1d5db; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{r.sp}}</span>
+</button>
+</sc-for>
+<div style="font-size: 11px; color: #9ca3af; padding-top: 6px">控えをタップしてからコートの選手をタップすると入れ替わります</div>
+</sc-if>
+
+<sc-if value="{{isTactic}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{groups}}" as="gr" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 12px; color: #9ca3af">{{gr.title}}</div>
+<div style="display: flex; gap: 6px; flex-wrap: wrap">
+<sc-for list="{{gr.opts}}" as="o" hint-placeholder-count="3">
+<button onClick="{{o.pick}}" style="{{o.style}}">{{o.label}}</button>
+</sc-for>
+</div>
+<div style="font-size: 11px; color: #d1d5db">{{gr.desc}}</div>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isOpp}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px">
+<div style="display: flex; gap: 16px; align-items: baseline">
+<span style="font-size: 15px; font-weight: 700">青嵐高校</span>
+<span style="color: #9ca3af">評判：強豪</span>
+<span style="color: #9ca3af">攻撃方針：不明</span>
+</div>
+<div style="display: grid; grid-template-columns: 26px 60px 30px 44px 122px minmax(0, 1fr); gap: 4px; font-size: 11px; color: #9ca3af; border-bottom: 1px solid #4b5563; padding-bottom: 4px">
+<span>番</span><span>名前</span><span>ポジ</span><span>身長</span>
+<span style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); text-align: center"><span>跳</span><span>力</span><span>速</span><span>技</span><span>ブ</span><span>体</span></span>
+<span>主な特能</span>
+</div>
+<sc-for list="{{opp}}" as="o" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 26px 60px 30px 44px 122px minmax(0, 1fr); gap: 4px; align-items: center; min-height: 30px; border-bottom: 1px solid #374151">
+<span>{{o.no}}</span><span style="font-weight: 500">{{o.name}}</span><span style="color: #93c5fd">{{o.pos}}</span><span>{{o.h}}cm</span>
+<span style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); text-align: center">
+<sc-for list="{{o.grades}}" as="g" hint-placeholder-count="6"><span>{{g}}</span></sc-for>
+</span>
+<span style="color: #d1d5db; font-size: 11px">{{o.sp}}</span>
+</div>
+</sc-for>
+<div style="font-size: 11px; color: #9ca3af">監督特能「データ分析」があると、相手の攻撃方針や傾向が表示されます</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</div>
+
+<div style="height: 52px; flex-shrink: 0; border-top: 1px solid #374151; display: flex; align-items: center; justify-content: space-between; padding: 0 12px">
+<div style="display: flex; align-items: center; gap: 6px">
+<span style="font-size: 12px; color: #9ca3af; margin-right: 2px">見せ方</span>
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+<button onClick="{{m.pick}}" style="{{m.style}}">{{m.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 10px; align-items: center">
+<span style="font-size: 11px; color: #9ca3af">前回の設定を引き継ぎ中</span>
+<button style="height: 44px; padding: 0 24px; background: #f59e0b; color: #111827; border: 0; border-radius: 6px; font-weight: 700; font-size: 14px; cursor: pointer">試合開始</button>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":844,"height":390}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      lineup: [1, 2, 3, 4, 5, 6],
+      bench: [8, 9, 10, 11],
+      sel: null,
+      tab: 'starter',
+      tactic: { attack: 'バランス', block: 'バンチ', receive: '後ろ寄り' },
+      mode: 'ハイライト'
+    };
+  }
+  renderVals() {
+    const P = {
+      1: { no: 1, name: '佐藤', pos: 'S', h: 176, cond: 'up', g: ['C', 'D', 'B', 'A', 'D', 'C'], sp: 'トス回し、コンビ◯' },
+      2: { no: 2, name: '高橋', pos: 'OH', h: 185, cond: 'best', g: ['A', 'A', 'C', 'C', 'C', 'B'], sp: 'ストレート◯、強打志向' },
+      3: { no: 3, name: '田中', pos: 'MB', h: 190, cond: 'mid', g: ['B', 'C', 'B', 'D', 'A', 'C'], sp: '速攻、時間差' },
+      4: { no: 4, name: '伊藤', pos: 'OP', h: 183, cond: 'mid', g: ['B', 'B', 'C', 'C', 'C', 'B'], sp: '二段打ち' },
+      5: { no: 5, name: '渡辺', pos: 'OH', h: 178, cond: 'down', g: ['C', 'C', 'B', 'B', 'D', 'B'], sp: 'サーブレシーブ職人' },
+      6: { no: 6, name: '山本', pos: 'MB', h: 188, cond: 'up', g: ['B', 'C', 'C', 'D', 'B', 'C'], sp: '号令' },
+      7: { no: 7, name: '中村', pos: 'L', h: 168, cond: 'mid', g: ['D', 'E', 'A', 'A', 'E', 'B'], sp: '守備の要、パンケーキ◯' },
+      8: { no: 8, name: '小林', pos: 'OH', h: 180, cond: 'mid', g: ['C', 'B', 'C', 'C', 'D', 'C'], sp: 'ジャンフロ◯' },
+      9: { no: 9, name: '加藤', pos: 'MB', h: 187, cond: 'down', g: ['C', 'D', 'C', 'D', 'C', 'D'], sp: 'コース読み' },
+      10: { no: 10, name: '吉田', pos: 'S', h: 172, cond: 'mid', g: ['D', 'D', 'C', 'B', 'E', 'C'], sp: '乱れ玉セット' },
+      11: { no: 11, name: '山田', pos: 'OP', h: 182, cond: 'up', g: ['B', 'B', 'D', 'D', 'C', 'C'], sp: 'ピンチサーバー' }
+    };
+    const COND = {
+      best: { t: '絶好調', c: '#fbbf24' },
+      up: { t: '好調', c: '#86efac' },
+      mid: { t: '普通', c: '#d1d5db' },
+      down: { t: '不調', c: '#93c5fd' }
+    };
+    const st = this.state;
+    const sel = st.sel;
+
+    const pickCourt = (i) => () => {
+      const s = this.state;
+      const L = s.lineup.slice();
+      const B = s.bench.slice();
+      const cur = s.sel;
+      if (!cur) { this.setState({ sel: { k: 'c', i: i } }); return; }
+      if (cur.k === 'c') {
+        if (cur.i !== i) { const t = L[i]; L[i] = L[cur.i]; L[cur.i] = t; }
+        this.setState({ lineup: L, sel: null });
+        return;
+      }
+      const bi = B.indexOf(cur.id);
+      const old = L[i];
+      L[i] = cur.id;
+      B[bi] = old;
+      this.setState({ lineup: L, bench: B, sel: null });
+    };
+    const pickBench = (id) => () => {
+      const s = this.state;
+      const cur = s.sel;
+      if (cur && cur.k === 'c') {
+        const L = s.lineup.slice();
+        const B = s.bench.slice();
+        const bi = B.indexOf(id);
+        const old = L[cur.i];
+        L[cur.i] = id;
+        B[bi] = old;
+        this.setState({ lineup: L, bench: B, sel: null });
+        return;
+      }
+      if (cur && cur.k === 'b' && cur.id === id) { this.setState({ sel: null }); return; }
+      this.setState({ sel: { k: 'b', id: id } });
+    };
+
+    const slotBase = 'display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 6px; border: 2px solid transparent; background: rgba(17, 24, 39, 0.85); color: #f9fafb; cursor: pointer; padding: 4px; min-height: 44px;';
+    const slot = (i) => {
+      const p = P[st.lineup[i]];
+      const on = sel && sel.k === 'c' && sel.i === i;
+      return {
+        posNo: i === 0 ? '1 サーブ' : String(i + 1),
+        no: p.no, name: p.name, role: p.pos, h: p.h,
+        pick: pickCourt(i),
+        style: slotBase + (on ? ' border-color: #fbbf24;' : ''),
+        label: 'ポジション' + (i + 1) + ' ' + p.no + '番 ' + p.name
+      };
+    };
+
+    const rowBase = 'display: grid; grid-template-columns: 44px 26px 52px 30px 44px 40px 122px minmax(0, 1fr); align-items: center; gap: 4px; width: 100%; min-height: 34px; padding: 0 6px; box-sizing: border-box; background: transparent; border: 1px solid transparent; border-bottom: 1px solid #374151; color: #f9fafb; font-size: 12px; text-align: left; cursor: pointer;';
+    const mkRow = (id, where, whereColor, pick, on) => {
+      const p = P[id];
+      const c = COND[p.cond];
+      return {
+        where: where, whereColor: whereColor,
+        no: p.no, name: p.name, pos: p.pos, h: p.h,
+        cond: c.t, condColor: c.c,
+        grades: p.g, sp: p.sp,
+        pick: pick,
+        style: rowBase + (on ? ' border: 1px solid #fbbf24; background: rgba(251, 191, 36, 0.08);' : ''),
+        label: where + ' ' + p.no + '番 ' + p.name
+      };
+    };
+    const rows = [];
+    st.lineup.forEach((id, i) => {
+      rows.push(mkRow(id, 'コート' + (i + 1), '#86efac', pickCourt(i), sel && sel.k === 'c' && sel.i === i));
+    });
+    rows.push(mkRow(7, 'リベロ', '#fbbf24', () => {}, false));
+    st.bench.forEach((id) => {
+      rows.push(mkRow(id, '控え', '#9ca3af', pickBench(id), sel && sel.k === 'b' && sel.id === id));
+    });
+
+    const tabBase = 'height: 40px; padding: 0 16px; border-radius: 6px 6px 0 0; font-size: 13px; cursor: pointer; border: 1px solid #374151; border-bottom: 0;';
+    const tabs = [
+      { key: 'starter', label: 'スタメン' },
+      { key: 'tactic', label: '作戦' },
+      { key: 'opp', label: '相手' }
+    ].map((t) => ({
+      label: t.label,
+      pick: () => this.setState({ tab: t.key, sel: null }),
+      style: tabBase + (st.tab === t.key ? ' background: #1f2937; color: #f9fafb; font-weight: 700;' : ' background: transparent; color: #9ca3af;')
+    }));
+
+    const optBase = 'height: 40px; padding: 0 14px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #4b5563;';
+    const optStyle = (on) => optBase + (on ? ' background: #60a5fa; color: #111827; font-weight: 700; border-color: #60a5fa;' : ' background: transparent; color: #f9fafb;');
+    const DEF = [
+      { key: 'attack', title: '攻撃', opts: [
+        ['エース中心', 'エースに高いトスを集める。エースの身長・跳躍・パワーが活きる'],
+        ['バランス', 'エースと速攻を混ぜる。崩れにくいが尖った強さはない'],
+        ['速攻中心', 'ミドルの速攻・時間差を多用。セッターの技術とミドルの速さが活きる']
+      ] },
+      { key: 'block', title: 'ブロック', opts: [
+        ['バンチ', '中央に寄る。速攻に強く、サイドへの速いトスに遅れやすい'],
+        ['スプレッド', '広がる。サイドに確実に1枚つくが、中央の速攻に弱い'],
+        ['デディケート', '相手エースの側に寄る。反対側が手薄になる']
+      ] },
+      { key: 'receive', title: 'レシーブ', opts: [
+        ['前寄り', 'フェイント・軟打を警戒する'],
+        ['後ろ寄り', '強打を警戒する']
+      ] }
+    ];
+    const groups = DEF.map((g) => {
+      const cur = st.tactic[g.key];
+      const hit = g.opts.find((o) => o[0] === cur);
+      return {
+        title: g.title,
+        desc: hit ? hit[1] : '',
+        opts: g.opts.map((o) => ({
+          label: o[0],
+          style: optStyle(o[0] === cur),
+          pick: () => { const t = Object.assign({}, this.state.tactic); t[g.key] = o[0]; this.setState({ tactic: t }); }
+        }))
+      };
+    });
+
+    const modeBase = 'height: 40px; padding: 0 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid #4b5563;';
+    const modes = ['フル', 'ハイライト', '結果のみ'].map((m) => ({
+      label: m,
+      pick: () => this.setState({ mode: m }),
+      style: modeBase + (st.mode === m ? ' background: #60a5fa; color: #111827; font-weight: 700; border-color: #60a5fa;' : ' background: transparent; color: #f9fafb;')
+    }));
+
+    const opp = [
+      { no: 1, name: '大森', pos: 'OH', h: 188, grades: ['A', 'A', 'B', 'C', 'C', 'B'], sp: 'クロス好み、勝負強い' },
+      { no: 3, name: '岸', pos: 'MB', h: 192, grades: ['A', 'B', 'C', 'D', 'A', 'C'], sp: 'キルブロック' },
+      { no: 2, name: '早瀬', pos: 'S', h: 178, grades: ['C', 'D', 'B', 'A', 'C', 'B'], sp: '配球眼' }
+    ];
+
+    return {
+      selHint: sel ? 'もう1人を選ぶと入れ替え' : 'タップで入れ替え',
+      front: [3, 2, 1].map(slot),
+      back: [4, 5, 0].map(slot),
+      rows: rows,
+      tabs: tabs,
+      isStarter: st.tab === 'starter',
+      isTactic: st.tab === 'tactic',
+      isOpp: st.tab === 'opp',
+      groups: groups,
+      modes: modes,
+      opp: opp
+    };
+  }
+}
+</script>
+</body>
+</html>
