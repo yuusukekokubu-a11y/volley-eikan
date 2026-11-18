@@ -2,6 +2,7 @@
 // 角度はラジアン。体の前（向いている方向）へ振るのを＋とする。
 //   脚・腕：0＝真下にまっすぐ、＋で前へ振る（腕は π で真上）
 //   膝：0＝まっすぐ、＋で曲げる（すねが後ろへ）
+//   肘：0＝まっすぐ、＋で曲げる（前腕が体の前へ）
 //   lean：上体の前傾、pitch：体ごと前に倒れる（飛びつき）
 
 import type { PlayerFrame } from './playback';
@@ -15,6 +16,8 @@ export interface Joints {
   kneeF: number;
   armN: number;
   armF: number;
+  elbowN: number;
+  elbowF: number;
 }
 
 const PI = Math.PI;
@@ -132,7 +135,33 @@ export function targetJoints(pl: PlayerFrame, runPhase: number): Joints {
   }
 
   const [armN, armF] = arms ?? [PI * 0.15, PI * 0.15];
-  return { pitch, lean, thighN, kneeN, thighF, kneeF, armN, armF };
+  const [elbowN, elbowF] = elbowAngles(pl);
+  return { pitch, lean, thighN, kneeN, thighF, kneeF, armN, armF, elbowN, elbowF };
+}
+
+/** 肘の曲げ [手前の腕, 奥の腕]。動作の腕のポーズ → 跳ぶ動き → 走り → 待機 の順に決める */
+export function elbowAngles(pl: PlayerFrame): [number, number] {
+  const t = pl.poseT;
+  switch (pl.pose) {
+    case 'spike': return t < 0.6 ? [1.5, 0.35] : [0.12, 0.45]; // 肘を引いて振りかぶり、伸ばして打つ
+    case 'tip': return [0.45, 0.4];
+    case 'block': return [0.06, 0.06];
+    case 'set': return [1.35, 1.35];                           // 額の上で肘を曲げて受ける
+    case 'serve': return t < 0.5 ? [0.3, 0.2] : [0.15, 0.3];
+    case 'receive': case 'dig': case 'cover': case 'dive': return [0.04, 0.04];
+  }
+  if (pl.jumpPhase === 'prep') return [0.15, 0.15];
+  if (pl.jumpPhase === 'air') return [0.5, 0.5];
+  if (pl.speed > 0.5) {
+    const a = Math.min(1, pl.speed / 3);
+    const bend = 0.35 + 1.0 * a;
+    if (pl.moveKind === 'approach') {
+      const back = smooth((pl.moveT - 0.55) / 0.45);
+      return [mix(bend, 0.15, back), mix(bend, 0.15, back)];
+    }
+    return [bend, bend];
+  }
+  return [0.35, 0.35];
 }
 
 /** 脚の長さと角度から、足が床に着く腰の高さを求める（低い方の足が床に着く） */
