@@ -1,7 +1,7 @@
 // 試作・テスト用のチームを作る。ゲーム本編の選手生成（新入生の仕組み）とは別物。
 
 import { Rng } from './rng';
-import type { Gender, LineupSlot, Player, Role, ServeType, Tactics, TeamState } from './types';
+import type { Gender, LineupSlot, Player, Role, Tactics, TeamState } from './types';
 
 type Strength = number; // 能力の平均の目安（0〜100）
 
@@ -14,8 +14,9 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
   const n = (spread = 10) => Math.round(Math.min(99, Math.max(1, avg + rng.normal() * spread)));
   const apt: Record<Role, number> = { S: 20, OH: 30, MB: 30, OP: 30, L: 20 };
   apt[role] = 70 + Math.round(rng.range(0, 30));
-  const serveType: ServeType = rng.weighted([
-    { item: 'float' as const, w: 3 }, { item: 'jumpFloat' as const, w: 3 }, { item: 'spike' as const, w: role === 'OH' || role === 'OP' ? 3 : 1 },
+  // サーブは解禁特能で決まる（試作用に適当に持たせる）
+  const serve = rng.weighted([
+    { item: [] as string[], w: 3 }, { item: ['jumpFloat'], w: 3 }, { item: ['spikeServe'], w: role === 'OH' || role === 'OP' ? 3 : 1 },
   ])!;
   return {
     id, name: `${id}`, number,
@@ -27,8 +28,7 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     block: n() + (role === 'MB' ? 8 : 0),
     stamina: n(),
     aptitude: apt,
-    serveType,
-    traits: [],
+    traits: [...serve],
     condition: 0,
   };
 }

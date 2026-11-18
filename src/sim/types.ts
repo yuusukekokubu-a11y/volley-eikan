@@ -25,8 +25,7 @@ export interface Player extends Abilities {
   number: number;
   /** ポジション適性 0〜100 */
   aptitude: Record<Role, number>;
-  serveType: ServeType;
-  /** 特殊能力の ID。今の段階では効果なし（traits.ts の差し込み口から効かせる） */
+  /** 特殊能力の ID（traits.ts の TRAITS に登録されたもの）。サーブの種類も解禁特能で決まる */
   traits: string[];
   /** 調子 -2（絶不調）〜 +2（絶好調） */
   condition: number;
@@ -123,6 +122,8 @@ export interface ActionInfo {
   serveType?: ServeType;
   /** 二段トス（セッター以外のトス） */
   secondary?: boolean;
+  /** 相手の返球を直接打った（ダイレクト） */
+  direct?: boolean;
 }
 
 export type SetType = 'quick' | 'timeDiff' | 'fast' | 'high';

@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "rally": "tsx scripts/rally-demo.ts"
+    "rally": "tsx scripts/rally-demo.ts",
+    "tactics": "tsx scripts/tactics-check.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

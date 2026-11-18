@@ -117,6 +117,11 @@ export const SERVE = {
   targetU: [1.5, 8.6],
   targetV: [-4.2, 4.2],
   serverU: 9.8,
+  /** 狙いの判断：比べる候補の数 = 1 + テクニック/aimTechDiv */
+  aimTechDiv: 30,
+  /** 狙いのずれ（m）＝aimErrBase - テクニック×aimErrTech（下限0.25） */
+  aimErrBase: 1.4,
+  aimErrTech: 0.01,
 };
 
 // ---------------- レシーブ・ディグ（1本目） ----------------
@@ -135,6 +140,8 @@ export const PASS = {
   /** ずれがこれ以上で、相手コートへ返ってしまうことがある */
   overpassOffset: 3.8,
   overpassChance: 0.5,
+  /** これ以上の威力のサーブ・強打を受ける時は場面 receiveHard */
+  hardPressure: 60,
   /** 技量＝テクニック×tech（skill重み）＋スピード×speed（phys重み）＋base */
   skill: { base: 15, tech: 0.75, speed: 0.15 },
   contactZ: { receive: 0.8, dig: 0.5, dive: 0.25 },
@@ -153,6 +160,8 @@ export const SET = {
   skillPivot: 1.6,
   /** セッター以外が上げる時の技量の掛け率 */
   secondarySkill: 0.6,
+  /** 回転・勢いがこれ以上のパスからのトスは場面 setSpin */
+  spinScene: 0.4,
   /** これ以上ずれると打てない（つなぎで返す） */
   unhittable: 1.6,
   /** これ以上ずれるとトスミス（ボールが続かない） */
@@ -163,6 +172,8 @@ export const SET = {
     balance: { quick: 0.25, timeDiff: 0.1, fast: 0.3, high: 0.35 },
     quick: { quick: 0.42, timeDiff: 0.25, fast: 0.2, high: 0.13 },
   } as Record<AttackTactic, Record<SetType, number>>,
+  /** 配球の判断：ブロックが薄そうな攻撃ほど選びやすくなる強さ（テクニック100で最大） */
+  choiceK: 0.9,
   /** サイドへのトスがエースに行く確率 */
   aceShare: { ace: 0.85, balance: 0.55, quick: 0.5 } as Record<AttackTactic, number>,
 };
@@ -174,13 +185,18 @@ export const ATTACK = {
   tech: 0.3,
   height: 0.25,
   /** トスのずれ1mあたりの罰（攻撃の種類で速いほど大きい） */
-  tempoPenalty: { quick: 16, timeDiff: 13, fast: 10, high: 8 } as Record<SetType, number>,
-  /** 速攻・時間差でスピードが足りない時の罰（50基準、1あたり） */
-  quickSpeedPenalty: 0.25,
+  tempoPenalty: { quick: 20, timeDiff: 15, fast: 10, high: 8 } as Record<SetType, number>,
+  /** 速攻・時間差でスピードが足りない時の罰（quickSpeedPivot 基準、1あたり） */
+  quickSpeedPivot: 65,
+  quickSpeedPenalty: 0.3,
+  /** 同じく、ミス率の増え方（1あたり） */
+  quickSpeedErr: 0.004,
   errBase: 0.06,
   errPerSetError: 0.12,
   errTechSlope: 0.0012,
   softErrRatio: 0.4,
+  /** ダイレクトはトスに合わせて打つより難しい分の罰 */
+  directPenalty: 6,
   /** 軟打・フェイントを選ぶ確率 */
   softBase: 0.08,
   softBadSet: 0.3,
@@ -210,8 +226,12 @@ export const BLOCK = {
   readExtra: 0.1,
   spotSpacing: 0.7,
   maxBlockers: 3,
-  /** 時間差のフェイクに跳んでしまう確率 */
+  /** ブロックの読み：トスを見て動き出すまでの時間（ブロック0→max、100→min） */
+  readReactionMax: 0.32,
+  readReactionMin: 0.12,
+  /** 時間差のフェイクに跳んでしまう確率（ブロック50の時）。読みが良いほど減る */
   timeDiffBite: 0.45,
+  biteReadSlope: 0.006,
   /** 壁の強さ W = Σ 間に合い×(ブロック/100)×高さ係数。触る確率 = 1-exp(-W×touchK) */
   touchK: 1.3,
   heightFactorDivCm: 50,
@@ -229,6 +249,18 @@ export const BLOCK = {
   oneTouchPressure: 0.45,
   /** シャットされたボールを味方が拾う確率 */
   coverChance: 0.18,
+};
+
+// ---------------- ダイレクト（相手の返球を直接打つ） ----------------
+export const DIRECT = {
+  /** ネットからこの距離以内に返ってきたボールを打てる */
+  maxU: 1.5,
+  /** 返ってくるボールの着地点の範囲（ネットからの距離） */
+  overpassU: [0.3, 4.5] as [number, number],
+  /** トスほど合わせられないので、トスのずれに相当する値（m）の上限 */
+  maxError: 0.7,
+  /** 相手ブロックが反応できる時間 */
+  blockTime: 0.3,
 };
 
 // ---------------- 作戦が合っている時の補正 ----------------

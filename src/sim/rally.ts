@@ -10,14 +10,14 @@ import {
   sideSpeed, standingReachCm, type AbilityKey,
 } from './ability';
 import {
-  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, DEFENSE_POS, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
+  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, DEFENSE_POS, DIRECT, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
   MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SET, SET_TARGET, TACTIC_FIT, TIMING,
 } from './constants';
 import { Rng } from './rng';
-import { applyTraits, type Side } from './traits';
+import { canDo, traitDelta, type Scene } from './traits';
 import type {
   ActionInfo, ActionType, BallKind, BallSegment, Player, PlayerPlacement, PointReason, RallyEvent,
-  RallyInput, RallyRecord, Role, SetType, TeamId, Vec2, Vec3,
+  RallyInput, RallyRecord, Role, ServeType, SetType, TeamId, Vec2, Vec3,
 } from './types';
 
 interface Local { u: number; v: number }
@@ -73,10 +73,14 @@ interface SetBall {
   tHit: number;
   setError: number;
   secondary: boolean;
+  /** 相手の返球を直接打つ */
+  direct?: boolean;
 }
 
 interface Blocker {
   cp: CourtPlayer;
+  /** ブロック能力を引く時の場面 */
+  sc: Scene[];
   spot: Local;
   timing: number;
   reachCm: number;
@@ -118,11 +122,17 @@ class RallySim {
   private touches = 0;
   private placements: PlayerPlacement[] = [];
   private result?: { winner: TeamId; reason: PointReason; key?: string; t: number };
+  /** セット終盤か（特能の場面 clutch） */
+  private clutch: boolean;
+  /** このラリーで各選手が打った回数（連続トスの場面用） */
+  private attackCount = new Map<string, number>();
 
   constructor(private input: RallyInput) {
     this.rng = new Rng(input.seed);
     this.w = GENDER_WEIGHTS[input.gender];
     this.netH = COURT.netHeight[input.gender];
+    const ctx = input.context;
+    this.clutch = !!ctx && Math.max(ctx.score.A, ctx.score.B) >= (ctx.isFinalSet ? 10 : 20);
   }
 
   run(): RallyRecord {
@@ -218,16 +228,28 @@ class RallySim {
   // 能力の値
   // ============================================================
 
+  /** 調子と疲れを反映した能力（特能なし）。打点・到達点と移動の速さはこれを使う */
   private eff(c: CourtPlayer, k: AbilityKey): number {
     return effective(c.p, k, c.fatigue);
   }
+  /** その場面での能力（特能の上下を含む） */
+  private ab(c: CourtPlayer, k: AbilityKey, scenes: Scene[] = []): number {
+    const set = new Set<Scene>(['all', ...scenes]);
+    if (this.clutch) set.add('clutch');
+    const row = { front: c.front, teammates: this.court[c.team].map(m => ({ p: m.p, front: m.front })) };
+    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row));
+  }
   /** 体の能力（跳躍・パワー・スピード）が判定に効く量。男女の重みを掛ける */
-  private phys(c: CourtPlayer, k: AbilityKey): number {
-    return this.eff(c, k) * this.w.physical;
+  private phys(c: CourtPlayer, k: 'jump' | 'power' | 'speed', scenes: Scene[] = []): number {
+    return this.ab(c, k, scenes) * this.w.physical;
   }
   /** テクニックが判定に効く量。男女の重みを掛ける */
-  private skill(c: CourtPlayer, k: AbilityKey): number {
-    return this.eff(c, k) * this.w.skill;
+  private skill(c: CourtPlayer, scenes: Scene[] = []): number {
+    return this.ab(c, 'technique', scenes) * this.w.skill;
+  }
+  /** ブロック能力（読みとタイミング）。男女の重みは掛けない */
+  private blockSkill(c: CourtPlayer, scenes: Scene[] = []): number {
+    return this.ab(c, 'block', ['block', ...scenes]);
   }
   private hitCm(c: CourtPlayer): number {
     return hitHeightCm(c.p.height, this.eff(c, 'jump'));
@@ -236,7 +258,7 @@ class RallySim {
     return blockReachCm(c.p.height, this.eff(c, 'jump'));
   }
   private attackRating(c: CourtPlayer): number {
-    return this.phys(c, 'power') * ATTACK.power + this.skill(c, 'technique') * ATTACK.tech
+    return this.phys(c, 'power') * ATTACK.power + this.skill(c) * ATTACK.tech
       + (this.hitCm(c) - this.netH * 100) * ATTACK.height * this.w.physical;
   }
   private reachDist(c: CourtPlayer, time: number): number {
@@ -247,10 +269,6 @@ class RallySim {
   private timeToReact(c: CourtPlayer, tArrive: number, flight: number): number {
     const free = (this.busyUntil.get(c.p.id) ?? -Infinity) + BODY.landingRecovery;
     return tArrive - Math.max(tArrive - flight, free);
-  }
-  private trait(values: Record<string, number>, judge: Parameters<typeof applyTraits>[1],
-    inv: { c: CourtPlayer; side: Side }[]) {
-    applyTraits(values, judge, inv.map(i => ({ player: i.c.p, team: i.c.team, side: i.side })), this.input.context);
   }
 
   // ============================================================
@@ -407,16 +425,14 @@ class RallySim {
     const st = this.input.serving;
     const rt = other(st);
     const server = this.court[st].find(c => c.zoneIdx === 0)!;
-    const type = server.p.serveType;
+    const type = serveTypeOf(server.p);
     const tc = TIMING.serveContact;
-    const tech = this.skill(server, 'technique');
+    const sc: Scene[] = ['serve', type === 'float' ? 'serveFloat' : type === 'jumpFloat' ? 'serveJumpFloat' : 'serveSpike'];
+    const tech = this.skill(server, sc);
     const pc = SERVE.pressure[type];
-    const v: Record<string, number> = {
-      faultRate: clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope), 0.01, 0.6),
-      pressure: pc.base + tech * pc.tech + this.phys(server, 'power') * pc.power + this.phys(server, 'jump') * pc.jump,
-      shake: SERVE.shake[type],
-    };
-    this.trait(v, 'serve', [{ c: server, side: 'actor' }]);
+    const faultRate = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope), 0.01, 0.6);
+    const pressure = pc.base + tech * pc.tech + this.phys(server, 'power', sc) * pc.power + this.phys(server, 'jump', sc) * pc.jump;
+    const shake = SERVE.shake[type];
 
     const sPos = this.pos.get(server.p.id)!;
     const standing = standingReachCm(server.p.height) / 100;
@@ -432,11 +448,11 @@ class RallySim {
     // サーブを打った後はサーブ側が守備の隊形へ
     this.defenseBase(st, tc + 0.2);
 
-    const target: Local = { u: this.rng.range(SERVE.targetU[0], SERVE.targetU[1]), v: this.rng.range(SERVE.targetV[0], SERVE.targetV[1]) };
     const flight = TIMING.serveFlight[type];
+    const target = this.serveAim(server, rt, flight, sc);
     const apex = type === 'spike' ? Math.max(z, this.netH + 0.6) : Math.max(z, this.netH + 0.8) + 0.4;
 
-    if (this.rng.chance(v.faultRate)) {
+    if (this.rng.chance(faultRate)) {
       if (this.rng.chance(0.5)) {
         const net = { x: 0, y: this.world(rt, target).y, z: this.netH - 0.3 };
         this.ballTo(net, tc + flight * 0.5, 'serve', Math.max(z, this.netH) + 0.2);
@@ -454,9 +470,32 @@ class RallySim {
     return {
       kind: 'incoming',
       inc: {
-        team: rt, kind: 'serve', land: target, tArrive: tc + flight, flight, pressure: v.pressure, shake: v.shake,
+        team: rt, kind: 'serve', land: target, tArrive: tc + flight, flight, pressure, shake,
         apex, ballKind: 'serve', dropReason: 'ace', dropKey: server.p.id, sender: server,
       },
+    };
+  }
+
+  /**
+   * サーブの狙い。判断（どこを狙うか）も実行（狙いどおり打てるか）もテクニックで決まる。
+   * 判断の場面 serveAim では、狙いを決める時だけ能力が上がる特能（弱点狙撃など）が効く。
+   */
+  private serveAim(server: CourtPlayer, rt: TeamId, flight: number, sc: Scene[]): Local {
+    const judge = this.skill(server, [...sc, 'serveAim']);
+    const exec = this.skill(server, sc);
+    const recv = this.receivers(rt);
+    const k = 1 + Math.floor(Math.max(0, judge) / SERVE.aimTechDiv);
+    let best: { l: Local; s: number } | undefined;
+    for (let i = 0; i < k; i++) {
+      const l: Local = { u: this.rng.range(SERVE.targetU[0], SERVE.targetU[1]), v: this.rng.range(SERVE.targetV[0], SERVE.targetV[1]) };
+      // レシーバーが動いて取りにくい所ほど良い
+      const s = Math.min(...recv.map(c => dist(this.pos.get(c.p.id)!, l) - this.reachDist(c, flight) * 0.3));
+      if (!best || s > best.s) best = { l, s };
+    }
+    const err = Math.max(0.25, SERVE.aimErrBase - exec * SERVE.aimErrTech);
+    return {
+      u: clamp(best!.l.u + this.rng.normal() * err, SERVE.targetU[0], SERVE.targetU[1]),
+      v: clamp(best!.l.v + this.rng.normal() * err, SERVE.targetV[0], SERVE.targetV[1]),
     };
   }
 
@@ -483,6 +522,12 @@ class RallySim {
       if (!best || margin > best.margin) best = { c, margin, d, reach };
     }
 
+    // 相手の返球がネット際に来たら、前衛が直接打つ（ダイレクト）
+    if (inc.kind === 'overpass' && inc.land.u <= DIRECT.maxU) {
+      const d = this.tryDirect(inc);
+      if (d) return d;
+    }
+
     const landW = this.world(team, inc.land);
     const forced = this.touches >= MAX_CONTACTS;
     if (!best || best.reach < best.d || forced) {
@@ -498,24 +543,21 @@ class RallySim {
 
     const c = best.c;
     const dive = best.d > best.reach - BODY.lunge;
-    let sk = PASS.skill.base + this.skill(c, 'technique') * PASS.skill.tech * (c.role === 'L' ? aptitudeFactor(c.p, 'L') : 1)
-      + this.phys(c, 'speed') * PASS.skill.speed;
+    const isServe = inc.kind === 'serve';
+    const sc: Scene[] = isServe ? ['serveReceive'] : inc.kind === 'freeball' || inc.kind === 'overpass' ? ['freeball'] : ['dig'];
+    if (isServe && inc.shake > 0) sc.push('receiveFloat');
+    if ((isServe || inc.kind === 'spike') && inc.pressure >= PASS.hardPressure) sc.push('receiveHard');
+    if (inc.kind === 'tip') sc.push('digTip');
+    if (dive) sc.push('dive');
+    let sk = PASS.skill.base + this.skill(c, sc) * PASS.skill.tech * (c.role === 'L' ? aptitudeFactor(c.p, 'L') : 1)
+      + this.phys(c, 'speed', sc) * PASS.skill.speed;
     if (inc.kind === 'spike' || inc.kind === 'tip') {
       const match = (inc.kind === 'spike') === (ts.tactics.receive === 'back');
       sk += (match ? TACTIC_FIT.receiveMatch : TACTIC_FIT.receiveMismatch) * this.w.tactic;
     }
     if (dive) sk -= 8;
     const baseKey = inc.kind === 'blockBack' ? 'oneTouch' : inc.kind;
-    const v: Record<string, number> = {
-      skill: sk, pressure: inc.pressure, base: PASS.base[baseKey], noise: PASS.noise + inc.shake,
-      failBelow: PASS.failBelow, offsetMul: 1, spinMul: 1,
-    };
-    const inv: { c: CourtPlayer; side: Side }[] = [{ c, side: 'actor' }];
-    if (inc.sender) inv.push({ c: inc.sender, side: 'opponent' });
-    this.trait(v, 'pass', inv);
-
-    const p = sigmoid((v.skill - v.pressure) / PASS.scale + v.base + this.rng.normal() * v.noise);
-    const isServe = inc.kind === 'serve';
+    const p = sigmoid((sk - inc.pressure) / PASS.scale + PASS.base[baseKey] + this.rng.normal() * (PASS.noise + inc.shake));
     const z = dive ? PASS.contactZ.dive : isServe ? PASS.contactZ.receive : PASS.contactZ.dig;
 
     this.moveTo(c, inc.land, inc.tArrive - inc.flight + 0.1, { arriveBy: inc.tArrive });
@@ -523,7 +565,7 @@ class RallySim {
     this.touches++;
     if (!isServe) this.load[c.p.id] += LOAD.dig;
 
-    if (p < v.failBelow) {
+    if (p < PASS.failBelow) {
       this.act(c, inc.tArrive, isServe ? 'receive' : 'dig', inc.land, z, { offset: 99, spin: 1 });
       const away: Local = { u: clamp(inc.land.u + this.rng.range(1, 4), 0, 12), v: inc.land.v + this.rng.range(-5, 5) };
       this.land(this.world(team, away), inc.tArrive + 0.7, 'deflect', z + this.rng.range(0.3, 2));
@@ -532,13 +574,13 @@ class RallySim {
       return this.point(opp, reason, inc.tArrive + 0.7, key);
     }
 
-    const offset = PASS.maxOffset * Math.pow(1 - p, PASS.offsetPow) * this.rng.range(0.6, 1.25) * v.offsetMul;
-    const spin = clamp((inc.pressure / 100) * (1 - p) * PASS.spinScale * v.spinMul + this.rng.range(0, 0.08), 0, 1);
+    const offset = PASS.maxOffset * Math.pow(1 - p, PASS.offsetPow) * this.rng.range(0.6, 1.25);
+    const spin = clamp((inc.pressure / 100) * (1 - p) * PASS.spinScale + this.rng.range(0, 0.08), 0, 1);
     this.act(c, inc.tArrive, isServe ? 'receive' : 'dig', inc.land, z, { offset: round(offset), spin: round(spin) });
 
     // ずれが大きいと相手コートへ返ってしまう
     if (offset >= PASS.overpassOffset && this.rng.chance(PASS.overpassChance)) {
-      const land: Local = { u: this.rng.range(1, 4.5), v: this.rng.range(-4, 4) };
+      const land: Local = { u: this.rng.range(DIRECT.overpassU[0], DIRECT.overpassU[1]), v: this.rng.range(-4, 4) };
       const tA = inc.tArrive + TIMING.overpassFlight;
       this.defenseBase(team, inc.tArrive + 0.2);
       this.attackBase(opp, inc.tArrive + 0.2, new Set());
@@ -610,15 +652,22 @@ class RallySim {
         options.push({ c, type: 'high', w: tw.high * part, lane });
       }
     }
-    const choice = this.rng.weighted(options.map(o => ({ item: o, w: o.w })));
+    // 配球の判断：テクニックが高いほど、相手ブロックが薄くなりそうな攻撃を選ぶ
+    const judge = this.skill(tosser, ['set', 'setChoice']) / 100;
+    const choice = this.rng.weighted(options.map(o => ({
+      item: o, w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter))),
+    })));
 
     // トスの精度
-    const tossSkill = this.skill(tosser, 'technique') * (useSetter ? aptitudeFactor(tosser.p, 'S') : SET.secondarySkill);
-    const v: Record<string, number> = {
-      errScale: SET.errBase * (1 + bu.offset * SET.errOffsetK + bu.spin * SET.errSpinK) * Math.max(0.2, SET.skillPivot - tossSkill / 100),
-    };
-    this.trait(v, 'set', [{ c: tosser, side: 'actor' }]);
-    const setError = Math.abs(this.rng.normal()) * v.errScale;
+    const ssc: Scene[] = ['set'];
+    if (!useSetter) ssc.push('setSecondary');
+    if (bu.offset > SET.maxOffset.fast) ssc.push('setBadPass');
+    if (bu.spin > SET.spinScene) ssc.push('setSpin');
+    if (choice && (choice.type === 'quick' || choice.type === 'timeDiff')) ssc.push('setQuick');
+    if (choice && choice.lane < bu.at.v - 0.5) ssc.push('setBack');
+    const tossSkill = this.skill(tosser, ssc) * (useSetter ? aptitudeFactor(tosser.p, 'S') : SET.secondarySkill);
+    const errScale = SET.errBase * (1 + bu.offset * SET.errOffsetK + bu.spin * SET.errSpinK) * Math.max(0.2, SET.skillPivot - tossSkill / 100);
+    const setError = Math.abs(this.rng.normal()) * errScale;
     this.touches++;
     this.load[tosser.p.id] += LOAD.set;
     const setZ = Math.max(2.0, standingReachCm(tosser.p.height) / 100 - 0.1);
@@ -684,12 +733,20 @@ class RallySim {
     const hitCm = this.hitCm(a);
     const hitZ = hitCm / 100;
     const netCm = this.netH * 100;
-    const tech = this.skill(a, 'technique');
+    const n = (this.attackCount.get(a.p.id) ?? 0) + 1;
+    this.attackCount.set(a.p.id, n);
+    const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
+    const sc: Scene[] = ['attack'];
+    if (sb.setError > ATTACK.softBadSetFrom) sc.push('attackBadSet');
+    if (quick) sc.push('attackQuick');
+    if (sb.secondary) sc.push('attackSecondary');
+    if (n >= 2) sc.push('attackRepeat');
+    if (sb.direct) sc.push('direct');
 
     let penalty = sb.setError * ATTACK.tempoPenalty[sb.setType];
-    if (sb.setType === 'quick' || sb.setType === 'timeDiff') {
-      penalty += Math.max(0, 50 - this.eff(a, 'speed')) * ATTACK.quickSpeedPenalty;
-    }
+    const slow = quick ? Math.max(0, ATTACK.quickSpeedPivot - this.ab(a, 'speed', sc)) : 0;
+    penalty += slow * ATTACK.quickSpeedPenalty;
+    if (sb.direct) penalty += ATTACK.directPenalty;
     const blockers = this.blockers(sb);
     const maxReach = blockers.reduce((m, b) => Math.max(m, b.reachCm), 0);
 
@@ -698,16 +755,15 @@ class RallySim {
     const minLand = hitZ - clearZ > 0.05 ? (sb.hit.u * clearZ) / (hitZ - clearZ) : Infinity;
     const canHard = minLand <= ATTACK.hardTargetU[1] - 0.5;
 
-    const v: Record<string, number> = {
-      power: this.phys(a, 'power') * ATTACK.power + tech * ATTACK.tech + (hitCm - netCm) * ATTACK.height * this.w.physical - penalty,
-      errRate: ATTACK.errBase + sb.setError * ATTACK.errPerSetError - (tech - 50) * ATTACK.errTechSlope,
-      softRate: ATTACK.softBase + (sb.setError > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
-        + (blockers.length && maxReach > hitCm ? ATTACK.softHighBlock : 0),
-    };
-    this.trait(v, 'attack', [{ c: a, side: 'actor' }, ...blockers.map(b => ({ c: b.cp, side: 'opponent' as Side }))]);
-
-    const soft = !canHard || this.rng.chance(v.softRate);
-    const errRate = clamp(v.errRate * (soft ? ATTACK.softErrRatio : 1), 0.01, 0.6);
+    const softRate = ATTACK.softBase + (sb.setError > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
+      + (blockers.length && maxReach > hitCm ? ATTACK.softHighBlock : 0);
+    const soft = !canHard || (!sb.direct && this.rng.chance(softRate));
+    if (soft) sc.push('tip');
+    const tech = this.skill(a, sc);
+    const power = (this.phys(a, 'power', sc) * ATTACK.power + tech * ATTACK.tech
+      + (hitCm - netCm) * ATTACK.height * this.w.physical - penalty) * (soft ? ATTACK.softPowerRatio : 1);
+    const errRate = clamp((ATTACK.errBase + sb.setError * ATTACK.errPerSetError - (tech - 50) * ATTACK.errTechSlope + slow * ATTACK.quickSpeedErr)
+      * (soft ? ATTACK.softErrRatio : 1), 0.01, 0.6);
     const overBlock = blockers.length > 0 && hitCm - maxReach >= BLOCK.overMarginCm;
 
     // 打ち手・ブロッカーの動き
@@ -719,7 +775,7 @@ class RallySim {
     }
     const info: ActionInfo = {
       setType: sb.setType, hitHeight: round(hitCm), blockReach: blockers.length ? round(maxReach) : undefined,
-      blockers: blockers.map(b => b.cp.p.id), overBlock,
+      blockers: blockers.map(b => b.cp.p.id), overBlock, direct: sb.direct || undefined,
     };
     this.act(a, sb.tHit, soft ? 'tip' : 'spike', sb.hit, hitZ, info);
     this.touches++;
@@ -748,7 +804,7 @@ class RallySim {
         kind: 'incoming',
         inc: {
           team: opp, kind: 'tip', land, tArrive: sb.tHit + TIMING.tipFlight, flight: TIMING.tipFlight,
-          pressure: v.power * ATTACK.softPowerRatio, shake: 0, apex: Math.max(hitZ, (maxReach || netCm) / 100) + 0.35,
+          pressure: power, shake: 0, apex: Math.max(hitZ, (maxReach || netCm) / 100) + 0.35,
           ballKind: 'tip', dropReason: 'tipKill', dropKey: a.p.id, sender: a,
         },
       };
@@ -758,25 +814,20 @@ class RallySim {
     if (blockers.length && !overBlock) {
       let wall = 0;
       for (const b of blockers) {
-        wall += b.timing * (this.eff(b.cp, 'block') / 100) * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
+        wall += b.timing * (this.blockSkill(b.cp, b.sc) / 100) * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
       }
-      const bv: Record<string, number> = {
-        touch: (1 - Math.exp(-wall * BLOCK.touchK)) * Math.max(0.3, BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv),
-        blockPower: BLOCK.power.base + Math.max(...blockers.map(b =>
-          this.eff(b.cp, 'block') * this.w.physical * BLOCK.power.block + (b.reachCm - hitCm) * BLOCK.power.height * this.w.physical))
-          + (blockers.length - 1) * BLOCK.power.extra,
-        attackPower: v.power,
-        blockOut: BLOCK.blockOutBase * (tech / 50),
-      };
-      this.trait(bv, 'block', [...blockers.map(b => ({ c: b.cp, side: 'actor' as Side })), { c: a, side: 'opponent' }]);
+      const touch = (1 - Math.exp(-wall * BLOCK.touchK)) * Math.max(0.3, BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv);
+      const blockPower = BLOCK.power.base + Math.max(...blockers.map(b =>
+        this.blockSkill(b.cp, b.sc) * BLOCK.power.block + (b.reachCm - hitCm) * BLOCK.power.height * this.w.physical))
+        + (blockers.length - 1) * BLOCK.power.extra;
 
-      if (this.rng.chance(bv.touch)) {
+      if (this.rng.chance(touch)) {
         const main = blockers[0];
         const contact = this.world(opp, { u: 0.15, v: -sb.hit.v }, main.reachCm / 100 - 0.1);
         this.ballTo(contact, tBlock, 'spike');
-        const pKill = sigmoid((bv.blockPower - bv.attackPower) / BLOCK.killScale + BLOCK.killBase);
+        const pKill = sigmoid((blockPower - power) / BLOCK.killScale + BLOCK.killBase);
         if (this.rng.chance(pKill)) return this.blockKill(sb, main, tBlock);
-        if (this.rng.chance(bv.blockOut)) {
+        if (this.rng.chance(BLOCK.blockOutBase * (tech / 50))) {
           const out: Local = this.rng.chance(0.5)
             ? { u: this.rng.range(9.5, 12), v: this.rng.range(-5, 5) }
             : { u: this.rng.range(2, 8), v: (this.rng.chance(0.5) ? 1 : -1) * this.rng.range(5, 7) };
@@ -790,7 +841,7 @@ class RallySim {
             kind: 'incoming',
             inc: {
               team, kind: 'blockBack', land, tArrive: tBlock + TIMING.oneTouchFlight, flight: TIMING.oneTouchFlight,
-              pressure: v.power * BLOCK.oneTouchPressure * 0.6, shake: 0.2, apex: contact.z + 1.2,
+              pressure: power * BLOCK.oneTouchPressure * 0.6, shake: 0.2, apex: contact.z + 1.2,
               ballKind: 'deflect', dropReason: 'blockKill', dropKey: main.cp.p.id, sender: main.cp,
             },
           };
@@ -800,7 +851,7 @@ class RallySim {
           kind: 'incoming',
           inc: {
             team: opp, kind: 'oneTouch', land, tArrive: tBlock + TIMING.oneTouchFlight, flight: TIMING.oneTouchFlight,
-            pressure: v.power * BLOCK.oneTouchPressure, shake: 0.3, apex: contact.z + 1.5,
+            pressure: power * BLOCK.oneTouchPressure, shake: 0.3, apex: contact.z + 1.5,
             ballKind: 'deflect', dropReason: 'kill', dropKey: a.p.id, sender: a,
           },
         };
@@ -808,7 +859,7 @@ class RallySim {
     }
 
     // ブロックを抜けた（または上から打ち抜いた）強打
-    const speed = TIMING.spikeSpeedBase + this.phys(a, 'power') * TIMING.spikeSpeedPerPower;
+    const speed = TIMING.spikeSpeedBase + this.phys(a, 'power', sc) * TIMING.spikeSpeedPerPower;
     const range: [number, number] = [Math.max(ATTACK.hardTargetU[0], minLand), ATTACK.hardTargetU[1]];
     const roughFlight = (sb.hit.u + (range[0] + range[1]) / 2) / speed;
     const land = this.aim(opp, range, roughFlight, tech, blockers);
@@ -818,7 +869,7 @@ class RallySim {
     return {
       kind: 'incoming',
       inc: {
-        team: opp, kind: 'spike', land, tArrive: sb.tHit + flight, flight, pressure: v.power, shake: 0,
+        team: opp, kind: 'spike', land, tArrive: sb.tHit + flight, flight, pressure: power, shake: 0,
         ballKind: 'spike', dropReason: 'kill', dropKey: a.p.id, sender: a,
       },
     };
@@ -828,7 +879,9 @@ class RallySim {
   private blockers(sb: SetBall): Blocker[] {
     const def = other(sb.team);
     const laneDef = -sb.hit.v;
-    const tAvail = TIMING.setFlight[sb.setType] + (sb.secondary ? TIMING.secondarySetExtra : 0) + BLOCK.readExtra;
+    const tAvail = sb.direct ? DIRECT.blockTime : TIMING.setFlight[sb.setType] + (sb.secondary ? TIMING.secondarySetExtra : 0) + BLOCK.readExtra;
+    const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
+    const sc: Scene[] = quick ? ['blockQuick'] : [];
     const front = [...this.frontSlots(def).keys()].filter(c => c.role !== 'L');
     front.sort((x, y) => Math.abs(this.pos.get(x.p.id)!.v - laneDef) - Math.abs(this.pos.get(y.p.id)!.v - laneDef));
     const res: Blocker[] = [];
@@ -846,21 +899,24 @@ class RallySim {
         spotV = laneDef + side * BLOCK.spotSpacing;
       }
       const spot: Local = { u: 0.3, v: clamp(spotV, -4.4, 4.4) };
-      // 時間差のフェイクに跳ばされる
-      if (sb.setType === 'timeDiff' && c.role === 'MB' && this.rng.chance(BLOCK.timeDiffBite)) {
+      // 読み（ブロック能力）：トスを見て動き出すまでの時間と、時間差のフェイクに跳ばされるか
+      const read = this.blockSkill(c, [...sc, 'blockRead']);
+      const bite = clamp(BLOCK.timeDiffBite + (50 - read) * BLOCK.biteReadSlope, 0.05, 0.9);
+      if (sb.setType === 'timeDiff' && c.role === 'MB' && this.rng.chance(bite)) {
         this.moveTo(c, { u: 0.3, v: clamp(-LANE_V.quick, -4, 4) }, sb.tSet, { dur: 0.2 });
         this.jump(c, tQuick - TIMING.blockRise, TIMING.blockTotal, (this.blockCm(c) - standingReachCm(c.p.height)) / 100);
         this.act(c, tQuick, 'block', this.pos.get(c.p.id)!, this.blockCm(c) / 100);
         return;
       }
       const sp = this.eff(c, 'speed');
-      // 反応→横移動→踏み切り（跳び上がるまでの時間）が、トスが上がってから打つまでに収まるか
-      const tNeed = reactionTime(sp) + Math.abs(spot.v - p.v) / sideSpeed(sp) + TIMING.blockRise;
+      const react = readReaction(read);
+      // 読み→横移動→踏み切り（跳び上がるまでの時間）が、トスが上がってから打つまでに収まるか
+      const tNeed = react + Math.abs(spot.v - p.v) / sideSpeed(sp) + TIMING.blockRise;
       const late = tNeed - tAvail;
       if (late > BLOCK.lateLimit) return;
       const timing = late <= 0 ? 1 : 1 - (late / BLOCK.lateLimit) * BLOCK.latePenalty;
-      this.moveTo(c, spot, sb.tSet + reactionTime(sp), { arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15) });
-      res.push({ cp: c, spot, timing, reachCm: this.blockCm(c) - (1 - timing) * 20 });
+      this.moveTo(c, spot, sb.tSet + react, { arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15) });
+      res.push({ cp: c, sc, spot, timing, reachCm: this.blockCm(c) - (1 - timing) * 20 });
     });
     // ブロックに跳ばない前衛は下がってフェイントや強打に備える
     for (const c of front) {
@@ -869,6 +925,48 @@ class RallySim {
       this.moveTo(c, { u: DEFENSE_POS.offBlockerU, v: clamp(p.v * 0.9, -3.8, 3.8) }, sb.tSet);
     }
     return res;
+  }
+
+  /** 配球の判断用：その攻撃に相手ブロックが何枚つきそうか（乱数を使わない見積もり） */
+  private expectedBlockers(def: TeamId, lane: number, type: SetType, secondary: boolean): number {
+    const laneDef = -lane;
+    const tAvail = TIMING.setFlight[type] + (secondary ? TIMING.secondarySetExtra : 0) + BLOCK.readExtra;
+    let n = 0;
+    for (const c of this.court[def]) {
+      if (!c.front || c.role === 'L') continue;
+      const p = this.pos.get(c.p.id)!;
+      const tNeed = readReaction(this.blockSkill(c, ['blockRead'])) + Math.abs(laneDef - p.v) / sideSpeed(this.eff(c, 'speed')) + TIMING.blockRise;
+      if (tNeed - tAvail <= BLOCK.lateLimit * 0.5) n++;
+    }
+    return Math.min(n, BLOCK.maxBlockers);
+  }
+
+  /** ダイレクト：ネット際に返ってきたボールを前衛が直接打つ。打てなければ普通に受ける */
+  private tryDirect(inc: Incoming): Step | undefined {
+    const team = inc.team;
+    const hit: Local = { u: Math.max(0.3, inc.land.u), v: inc.land.v };
+    const tHit = inc.tArrive - 0.15;
+    let best: { c: CourtPlayer; m: number } | undefined;
+    for (const c of this.court[team]) {
+      if (!c.front || c.role === 'L') continue;
+      const t = this.timeToReact(c, tHit, inc.flight - 0.15);
+      if (t <= 0) continue;
+      const m = this.reachDist(c, t) - dist(this.pos.get(c.p.id)!, hit);
+      if (m >= 0 && (!best || m > best.m)) best = { c, m };
+    }
+    if (!best) return undefined;
+    const a = best.c;
+    const hitZ = this.hitCm(a) / 100;
+    this.moveTo(a, { u: hit.u + 0.3, v: hit.v }, inc.tArrive - inc.flight + 0.2, { arriveBy: tHit - TIMING.jumpRise });
+    this.ballTo(this.world(team, hit, hitZ), tHit, inc.ballKind, Math.max(inc.apex ?? 0, hitZ + 0.3));
+    this.defenseBase(other(team), inc.tArrive - inc.flight + 0.2);
+    return {
+      kind: 'set',
+      sb: {
+        team, attacker: a, setType: 'high', hit, tSet: tHit - DIRECT.blockTime, tHit,
+        setError: this.rng.range(0, DIRECT.maxError), secondary: false, direct: true,
+      },
+    };
   }
 
   /** 狙う場所：テクニックが高いほど候補を多く比べて、守備のいない所を選ぶ */
@@ -899,9 +997,9 @@ class RallySim {
     const cover = cands
       .map(c => ({ c, m: this.reachDist(c, TIMING.blockReboundFlight + 0.1) - dist(this.pos.get(c.p.id)!, land) }))
       .sort((x, y) => y.m - x.m)[0];
-    const cv: Record<string, number> = { chance: BLOCK.coverChance };
-    if (cover) this.trait(cv, 'cover', [{ c: cover.c, side: 'actor' }, { c: main.cp, side: 'opponent' }]);
-    if (cover && cover.m >= 0 && this.rng.chance(cv.chance)) {
+    // フォローの上手さはテクニック（場面 cover）。50で基本の確率
+    const chance = cover ? clamp(BLOCK.coverChance * this.skill(cover.c, ['cover']) / 50, 0, 0.6) : 0;
+    if (cover && cover.m >= 0 && this.rng.chance(chance)) {
       const c = cover.c;
       this.moveTo(c, land, tBlock, { arriveBy: tLand });
       this.ballTo(this.world(team, land, 0.4), tLand, 'blockRebound');
@@ -920,6 +1018,18 @@ class RallySim {
     this.land(this.world(team, land), tLand, 'blockRebound');
     return this.point(other(team), 'blockKill', tLand, main.cp.p.id);
   }
+}
+
+/** サーブの種類：ジャンフロとスパイクサーブは解禁特能が必要。両方あればスパイクサーブ */
+export function serveTypeOf(p: Player): ServeType {
+  if (canDo(p, 'spikeServe')) return 'spike';
+  if (canDo(p, 'jumpFloat')) return 'jumpFloat';
+  return 'float';
+}
+
+/** ブロックの読みの速さ（ブロック能力から） */
+function readReaction(read: number): number {
+  return BLOCK.readReactionMax - ((BLOCK.readReactionMax - BLOCK.readReactionMin) * clamp(read, 0, 100)) / 100;
 }
 
 /** 始点・終点の高さと最高点から、BallSegment の bulge を求める */
