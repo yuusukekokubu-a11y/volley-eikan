@@ -1,28 +1,49 @@
-// 簡易3D（Three.js）の描画。
+// 試合の描画（簡易3D・Three.js）。
 // 計算の座標 (x, y, z) は Three.js では (x, z, -y) に置く（Three.js は y が上）。
 // カメラはテレビ中継のように手前の横（y が負の側）の斜め上に置く。
 
 import * as THREE from 'three';
 import { COURT } from '../sim/constants';
 import type { Gender } from '../sim/types';
-import { TEAM_COLOR, type Renderer } from './common';
+import { TEAM_COLOR } from './common';
 import type { Frame, PlayerFrame } from './playback';
-import { armAngles, bodyShape } from './render2d';
+import { blendJoints, hipHeight, targetJoints, type Joints } from './pose';
 
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y);
 
+/** 体の寸法（身長 h に対する割合など） */
+const BODY = {
+  legRatio: 0.47,   // 腰の高さ（脚の長さ）／身長
+  headR: 0.12,
+  neck: 0.05,
+  torsoR: 0.17,
+  thighR: 0.085,
+  shinR: 0.06,
+  hipHalfW: 0.1,    // 腰の中心から脚の付け根までの横幅
+  armLenRatio: 0.34,
+};
+
 interface PlayerMesh {
-  group: THREE.Group;
-  body: THREE.Mesh;
-  head: THREE.Group;
-  armNear: THREE.Group;
-  armFar: THREE.Group;
+  root: THREE.Group;    // 足元（床またはジャンプの高さ）
+  pitch: THREE.Group;   // 腰を軸に体ごと倒れる
+  upper: THREE.Group;   // 上体（前傾）
+  armN: THREE.Group;
+  armF: THREE.Group;
+  thighN: THREE.Group;
+  kneeN: THREE.Group;
+  thighF: THREE.Group;
+  kneeF: THREE.Group;
   shadow: THREE.Mesh;
-  label: THREE.Sprite;
-  height: number;
+  thigh: number;
+  shin: number;
+  joints?: Joints;
+  runPhase: number;
 }
 
-export class Render3D implements Renderer {
+/** 関節の動きを目標に寄せる速さ（1秒あたり） */
+const BLEND_RATE = 14;
+
+export class Render3D {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(30, 2, 0.1, 200);
@@ -30,6 +51,7 @@ export class Render3D implements Renderer {
   private ball: THREE.Mesh;
   private ballShadow: THREE.Mesh;
   private net = new THREE.Group();
+  private lastT = 0;
 
   constructor(canvas: HTMLCanvasElement, private gender: Gender) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -73,6 +95,10 @@ export class Render3D implements Renderer {
   }
 
   draw(fr: Frame) {
+    // 再生の時間の進み（速度の倍率込み）。大きく飛んだ時はなめらかにせずそのまま合わせる
+    const dt = fr.t - this.lastT;
+    this.lastT = fr.t;
+    const snap = dt < 0 || dt > 0.5;
     const seen = new Set<string>();
     for (const pl of fr.players) {
       seen.add(pl.id);
@@ -80,13 +106,13 @@ export class Render3D implements Renderer {
       if (!m) {
         m = makePlayer(pl);
         this.players.set(pl.id, m);
-        this.scene.add(m.group, m.shadow);
+        this.scene.add(m.root, m.shadow);
       }
-      updatePlayer(m, pl);
+      updatePlayer(m, pl, snap ? 0 : dt);
     }
     for (const [id, m] of this.players) {
       if (!seen.has(id)) {
-        this.scene.remove(m.group, m.shadow);
+        this.scene.remove(m.root, m.shadow);
         this.players.delete(id);
       }
     }
@@ -101,8 +127,9 @@ export class Render3D implements Renderer {
 
   /** 選手が入れ替わった時（新しいラリー）に古い人形を消す */
   reset() {
-    for (const m of this.players.values()) this.scene.remove(m.group, m.shadow);
+    for (const m of this.players.values()) this.scene.remove(m.root, m.shadow);
     this.players.clear();
+    this.lastT = 0;
   }
 
   private buildCourt() {
@@ -151,63 +178,114 @@ export class Render3D implements Renderer {
 const skin = new THREE.MeshLambertMaterial({ color: '#f1c7a1' });
 const hair = new THREE.MeshLambertMaterial({ color: '#222222' });
 
-function makePlayer(pl: PlayerFrame): PlayerMesh {
-  const { body: radius, headR } = bodyShape(pl);
-  const group = new THREE.Group();
-  const color = TEAM_COLOR[pl.team][pl.role === 'L' ? 'libero' : 'main'];
-  const bodyLen = Math.max(0.2, pl.height - headR * 2 - radius * 2);
-  // 体：上半分がユニフォーム、下半分が少し暗い（パンツと脚）
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(radius, bodyLen, 6, 14), new THREE.MeshLambertMaterial({ color }));
-  group.add(body);
+const shoe = new THREE.MeshLambertMaterial({ color: '#f4f4f4' });
 
+/** 長さ len のカプセルを、親の原点から下（-y）に向けて置く */
+function limb(len: number, r: number, mat: THREE.Material): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, len - r * 2), 4, 10), mat);
+  m.position.y = -len / 2;
+  return m;
+}
+
+function makePlayer(pl: PlayerFrame): PlayerMesh {
+  const h = pl.height;
+  const color = TEAM_COLOR[pl.team][pl.role === 'L' ? 'libero' : 'main'];
+  const shirt = new THREE.MeshLambertMaterial({ color });
+  const shorts = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).multiplyScalar(0.45) });
+
+  const legLen = h * BODY.legRatio;
+  const thigh = legLen * 0.5;
+  const shin = legLen * 0.5;
+  const torsoLen = h - legLen - BODY.headR * 2 - BODY.neck;
+
+  const root = new THREE.Group();
+  const pitch = new THREE.Group();
+  root.add(pitch);
+
+  // 腰（パンツ）
+  const hips = new THREE.Mesh(new THREE.CapsuleGeometry(BODY.torsoR * 0.95, 0.12, 4, 12), shorts);
+  hips.position.y = 0.04;
+  pitch.add(hips);
+
+  // 上体
+  const upper = new THREE.Group();
+  pitch.add(upper);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(BODY.torsoR, Math.max(0.05, torsoLen - BODY.torsoR * 2), 6, 14), shirt);
+  torso.position.y = torsoLen / 2 + 0.04;
+  upper.add(torso);
   const head = new THREE.Group();
-  const face = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skin);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(headR * 1.03, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), hair);
+  const face = new THREE.Mesh(new THREE.SphereGeometry(BODY.headR, 16, 12), skin);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(BODY.headR * 1.03, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), hair);
   cap.position.y = 0.02;
   head.add(face, cap);
-  group.add(head);
+  head.position.set(0.02, torsoLen + BODY.neck + BODY.headR, 0);
+  upper.add(head);
 
-  const makeArm = () => {
+  const armLen = h * BODY.armLenRatio;
+  const makeArm = (side: number) => {
     const pivot = new THREE.Group();
-    const len = 0.62 * (pl.height / 1.8);
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, len - 0.09, 4, 8), skin);
-    arm.position.y = -len / 2;
-    pivot.add(arm);
+    pivot.position.set(0, torsoLen - 0.08, side * (BODY.torsoR + 0.045));
+    pivot.add(limb(armLen, 0.045, skin));
+    upper.add(pivot);
     return pivot;
   };
-  const armNear = makeArm();
-  const armFar = makeArm();
-  group.add(armNear, armFar);
+  const armN = makeArm(1);
+  const armF = makeArm(-1);
+
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: numberTexture(pl.number, color), depthTest: false }));
+  label.scale.set(0.4, 0.4, 1);
+  label.position.set(0, torsoLen * 0.6, 0);
+  upper.add(label);
+
+  // 脚：太もも → 膝 → すね → 靴
+  const makeLeg = (side: number) => {
+    const hip = new THREE.Group();
+    hip.position.set(0, 0, side * BODY.hipHalfW);
+    hip.add(limb(thigh, BODY.thighR, shorts));
+    const knee = new THREE.Group();
+    knee.position.y = -thigh;
+    knee.add(limb(shin, BODY.shinR, skin));
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.07, 0.09), shoe);
+    foot.position.set(0.04, -shin + 0.02, 0);
+    knee.add(foot);
+    hip.add(knee);
+    pitch.add(hip);
+    return { hip, knee };
+  };
+  const ln = makeLeg(1);
+  const lf = makeLeg(-1);
 
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.32, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
   shadow.rotation.x = -Math.PI / 2;
 
-  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: numberTexture(pl.number, color), depthTest: false }));
-  label.scale.set(0.42, 0.42, 1);
-  group.add(label);
-
   // 向き：A は +x、B は -x を向く（体の前が +x になるように作ってある）
-  group.rotation.y = pl.team === 'A' ? 0 : Math.PI;
-  return { group, body, head, armNear, armFar, shadow, label, height: pl.height };
+  root.rotation.y = pl.team === 'A' ? 0 : Math.PI;
+  return {
+    root, pitch, upper, armN, armF, thighN: ln.hip, kneeN: ln.knee, thighF: lf.hip, kneeF: lf.knee, shadow,
+    thigh, shin, runPhase: 0,
+  };
 }
 
-function updatePlayer(m: PlayerMesh, pl: PlayerFrame) {
-  const { body: radius, headR, crouch } = bodyShape(pl);
-  const h = m.height;
-  m.group.position.copy(v3(pl.x, pl.y, pl.z));
-  const bodyH = (h - headR * 2) * crouch;
-  m.body.scale.y = crouch;
-  m.body.position.y = bodyH / 2;
-  m.head.position.y = bodyH + headR * 0.9;
-  m.head.position.x = 0.03;
-  const shoulderY = bodyH - 0.18;
-  const [near, far] = armAngles(pl);
-  // 腕は z 軸まわりに回す。0＝真下、π/2＝前（+x）、π＝真上
-  m.armNear.position.set(0, shoulderY, radius + 0.04);
-  m.armFar.position.set(0, shoulderY, -radius - 0.04);
-  m.armNear.rotation.z = near;
-  m.armFar.rotation.z = far;
-  m.label.position.set(0, bodyH * 0.72, 0);
+function updatePlayer(m: PlayerMesh, pl: PlayerFrame, dt: number) {
+  // 走る脚の振りは、進んだ距離で位相を進める（歩幅 約1.6m で1周）
+  m.runPhase += (pl.speed * dt * Math.PI * 2) / 1.6;
+  const target = targetJoints(pl, m.runPhase);
+  m.joints = !m.joints || dt === 0 ? target : blendJoints(m.joints, target, 1 - Math.exp(-BLEND_RATE * dt));
+  const j = m.joints;
+
+  m.root.position.copy(v3(pl.x, pl.y, pl.z));
+  m.pitch.position.y = hipHeight(j, m.thigh, m.shin);
+  // Three.js の z 軸まわりの回転は、＋で体の前（+x）から上へ。前へ倒すのはマイナス
+  m.pitch.rotation.z = -j.pitch;
+  m.upper.rotation.z = -j.lean;
+  m.thighN.rotation.z = j.thighN;
+  m.kneeN.rotation.z = -j.kneeN;
+  m.thighF.rotation.z = j.thighF;
+  m.kneeF.rotation.z = -j.kneeF;
+  // 腕は上体の前傾を打ち消して、体の向きに対する角度にする
+  m.armN.rotation.z = j.armN + j.lean;
+  m.armF.rotation.z = j.armF + j.lean;
+
   m.shadow.position.copy(v3(pl.x, pl.y, 0.01));
   const s = 1 - Math.min(0.4, pl.z * 0.3);
   m.shadow.scale.set(s, s, s);

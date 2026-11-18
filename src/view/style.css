@@ -18,16 +18,8 @@ html, body {
   user-select: none;
 }
 #app { position: fixed; inset: 0; }
-#views { position: absolute; inset: 0; display: flex; }
-.view { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
-.view canvas { display: block; }
-.view.hidden { display: none; }
-.view .tag {
-  position: absolute; left: 8px; bottom: 8px;
-  padding: 2px 8px; border-radius: 6px;
-  background: var(--panel); font-size: 13px; font-weight: 700;
-}
-#views.split .view + .view { border-left: 2px solid #000; }
+#view { position: absolute; inset: 0; overflow: hidden; }
+#view canvas { display: block; }
 #hud {
   position: absolute; left: 0; right: 0; top: 0;
   display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px;

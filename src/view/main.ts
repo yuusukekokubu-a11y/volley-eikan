@@ -1,25 +1,18 @@
-// 描画の比較ページ。試合計算で1ラリーずつ記録を作り、2D・3Dで同じ記録を再生する。
+// 試合の描画の試作ページ。試合計算で1ラリーずつ記録を作り、3Dで再生する。
 
 import { simulateRally } from '../sim/rally';
 import { makeTeam, rotate } from '../sim/sample';
 import type { Gender, TeamId, TeamState } from '../sim/types';
 import { Playback, pointText } from './playback';
-import { Render2D } from './render2d';
 import { Render3D } from './render3d';
 
-type Mode = 'split' | '2d' | '3d';
 const SPEEDS = [1, 2, 4];
 const TEAM_NAME: Record<TeamId, string> = { A: '赤', B: '青' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const views = $('views');
-const v2 = $('view2d');
-const v3 = $('view3d');
-const r2 = new Render2D(v2.querySelector('canvas')!, 'male');
-const r3 = new Render3D(v3.querySelector('canvas')!, 'male');
+const r3 = new Render3D($('view').querySelector('canvas')!, 'male');
 
 const params = new URLSearchParams(location.search);
-let mode: Mode = (params.get('mode') as Mode) || 'split';
 let gender: Gender = params.get('gender') === 'female' ? 'female' : 'male';
 let seed = Number(params.get('seed') || 1);
 let speedIdx = 0;
@@ -35,7 +28,6 @@ function resetMatch() {
   teams = { A: makeTeam(1, 'A', gender, 55), B: makeTeam(2, 'B', gender, 55) };
   serving = 'A';
   score = { A: 0, B: 0 };
-  r2.setGender(gender);
   r3.setGender(gender);
   newRally();
 }
@@ -68,15 +60,7 @@ function updateScore() {
 }
 
 function layout() {
-  views.className = mode === 'split' ? 'split' : '';
-  v2.classList.toggle('hidden', mode === '3d');
-  v3.classList.toggle('hidden', mode === '2d');
-  const h = window.innerHeight;
-  const w = window.innerWidth;
-  const each = mode === 'split' ? Math.floor(w / 2) - 1 : w;
-  r2.resize(each, h);
-  r3.resize(each, h);
-  $('btnMode').textContent = mode === 'split' ? '並べる' : mode === '2d' ? '2Dだけ' : '3Dだけ';
+  r3.resize(window.innerWidth, window.innerHeight);
 }
 
 let last = performance.now();
@@ -100,8 +84,7 @@ function tick(now: number) {
     if (i.direct) parts.push('ダイレクト');
     $('info').textContent = parts.join(' / ');
   }
-  if (mode !== '3d') r2.draw(fr);
-  if (mode !== '2d') r3.draw(fr);
+  r3.draw(fr);
   if (t > pb.duration + 0.8) {
     finishRally();
     newRally();
@@ -120,10 +103,6 @@ $('btnSpeed').onclick = () => {
 $('btnNext').onclick = () => {
   finishRally();
   newRally();
-};
-$('btnMode').onclick = () => {
-  mode = mode === 'split' ? '2d' : mode === '2d' ? '3d' : 'split';
-  layout();
 };
 $('btnGender').onclick = () => {
   gender = gender === 'male' ? 'female' : 'male';

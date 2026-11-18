@@ -1,9 +1,12 @@
-// 記録（RallyRecord）から、ある時刻の見た目の状態を求める。2D・3Dどちらの描画もこれを使う。
+// 記録（RallyRecord）から、ある時刻の見た目の状態を求める。描画はこれを使う。
 // 試合計算の結果を読むだけで、計算はしない。
 
 import type { ActionType, BallSegment, RallyEvent, RallyRecord, Role, TeamId, Vec2, Vec3 } from '../sim/types';
 
-export type Pose = 'ready' | 'serve' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover';
+export type Pose = 'ready' | 'serve' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover' | 'dive';
+
+/** ジャンプの段階：踏み込み（沈む）→ 空中 → 着地（膝で沈む） */
+export type JumpPhase = 'none' | 'prep' | 'air' | 'land';
 
 export interface PlayerFrame {
   id: string;
@@ -19,7 +22,16 @@ export interface PlayerFrame {
   pose: Pose;
   /** ポーズの進み具合 0〜1（腕の振りなど） */
   poseT: number;
+  /** 移動の速さ（m/s） */
+  speed: number;
+  jumpPhase: JumpPhase;
+  /** ジャンプの段階の中の進み具合 0〜1 */
+  jumpT: number;
 }
+
+/** 踏み込み・着地の時間（秒） */
+export const JUMP_PREP = 0.25;
+export const JUMP_LAND = 0.3;
 
 export interface Frame {
   t: number;
@@ -85,25 +97,46 @@ export class Playback {
         if (segs[i].t <= t) { pos = segAt(segs[i], t); break; }
       }
       let z = 0;
+      let jumpPhase: JumpPhase = 'none';
+      let jumpT = 0;
       for (const j of this.jumps.get(pl.playerId)!) {
         if (t >= j.t && t <= j.t + j.dur) {
           const s = (t - j.t) / j.dur;
           z = Math.max(z, j.height * 4 * s * (1 - s));
+          jumpPhase = 'air';
+          jumpT = s;
+        } else if (jumpPhase === 'none' && t >= j.t - JUMP_PREP && t < j.t) {
+          jumpPhase = 'prep';
+          jumpT = (t - (j.t - JUMP_PREP)) / JUMP_PREP;
+        } else if (jumpPhase === 'none' && t > j.t + j.dur && t <= j.t + j.dur + JUMP_LAND) {
+          jumpPhase = 'land';
+          jumpT = (t - j.t - j.dur) / JUMP_LAND;
         }
       }
+      // 移動の速さ（前後の位置の差から）
+      const at = (tt: number) => {
+        for (let i = segs.length - 1; i >= 0; i--) if (segs[i].t <= tt) return segAt(segs[i], tt);
+        return pl.pos;
+      };
+      const a0 = at(t - 0.03), a1 = at(t + 0.03);
+      const speed = Math.hypot(a1.x - a0.x, a1.y - a0.y) / 0.06;
       let pose: Pose = 'ready';
       let poseT = 0;
       for (const a of this.actions.get(pl.playerId)!) {
         const w = POSE_WINDOW[a.action];
         if (!w) continue;
-        if (t >= a.t - w.before && t <= a.t + w.after) {
-          pose = w.pose;
-          poseT = (t - (a.t - w.before)) / (w.before + w.after);
+        // 床すれすれで触ったレシーブ・ディグは飛びつき（倒れ込んだ後、少し起き上がるまで）
+        const dive = (a.action === 'dig' || a.action === 'receive' || a.action === 'cover') && a.pos.z <= 0.3;
+        const before = dive ? 0.35 : w.before;
+        const after = dive ? 0.6 : w.after;
+        if (t >= a.t - before && t <= a.t + after) {
+          pose = dive ? 'dive' : w.pose;
+          poseT = (t - (a.t - before)) / (before + after);
         }
       }
       return {
         id: pl.playerId, team: pl.team, number: pl.number, role: pl.role, height: pl.height / 100,
-        x: pos.x, y: pos.y, z, pose, poseT,
+        x: pos.x, y: pos.y, z, pose, poseT, speed, jumpPhase, jumpT,
       };
     });
 
