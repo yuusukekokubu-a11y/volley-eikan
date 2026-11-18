@@ -46,7 +46,3 @@ export function runSpeed(speed: number): number {
 export function sideSpeed(speed: number): number {
   return BODY.sideSpeedMin + ((BODY.sideSpeedMax - BODY.sideSpeedMin) * clamp(speed, 0, 120)) / 100;
 }
-
-export function reactionTime(speed: number): number {
-  return BODY.reactionMax - ((BODY.reactionMax - BODY.reactionMin) * clamp(speed, 0, 100)) / 100;
-}

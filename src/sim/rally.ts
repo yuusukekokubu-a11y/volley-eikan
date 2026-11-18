@@ -6,7 +6,7 @@
 // 記録に書く時に world() で共通の座標（types.ts の説明）に直す。
 
 import {
-  aptitudeFactor, blockReachCm, effective, hitHeightCm, jumpHeightCm, reactionTime, runSpeed,
+  aptitudeFactor, blockReachCm, effective, hitHeightCm, jumpHeightCm, runSpeed,
   sideSpeed, standingReachCm, type AbilityKey,
 } from './ability';
 import {
@@ -261,9 +261,12 @@ class RallySim {
     return this.phys(c, 'power') * ATTACK.power + this.skill(c) * ATTACK.tech
       + (this.hitCm(c) - this.netH * 100) * ATTACK.height * this.w.physical;
   }
+  /**
+   * ボールが来るまでに届く距離。動き出し（打球を読む判断）はテクニック、走る速さはスピードで決まる。
+   */
   private reachDist(c: CourtPlayer, time: number): number {
     const sp = this.eff(c, 'speed');
-    return Math.max(0, time - reactionTime(sp)) * runSpeed(sp) + BODY.lunge;
+    return Math.max(0, time - readTime(this.skill(c, ['dig']))) * runSpeed(sp) + BODY.lunge;
   }
   /** ボールが来るまでに使える時間（跳んだ後の着地と立て直しを差し引く） */
   private timeToReact(c: CourtPlayer, tArrive: number, flight: number): number {
@@ -755,8 +758,15 @@ class RallySim {
     const minLand = hitZ - clearZ > 0.05 ? (sb.hit.u * clearZ) / (hitZ - clearZ) : Infinity;
     const canHard = minLand <= ATTACK.hardTargetU[1] - 0.5;
 
+    // ブロックの壁の厚さ（枚数・間に合い具合・高さ・ブロック能力）
+    let wall = 0;
+    for (const b of blockers) {
+      wall += b.timing * (this.blockSkill(b.cp, b.sc) / 100) * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
+    }
+    // 軟打に切り替える判断：壁が厚いのを読めるほど（テクニック）軟打でかわす
+    const judge = this.skill(a, sc) / 100;
     const softRate = ATTACK.softBase + (sb.setError > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
-      + (blockers.length && maxReach > hitCm ? ATTACK.softHighBlock : 0);
+      + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge;
     const soft = !canHard || (!sb.direct && this.rng.chance(softRate));
     if (soft) sc.push('tip');
     const tech = this.skill(a, sc);
@@ -812,11 +822,8 @@ class RallySim {
 
     // ブロックに触るか
     if (blockers.length && !overBlock) {
-      let wall = 0;
-      for (const b of blockers) {
-        wall += b.timing * (this.blockSkill(b.cp, b.sc) / 100) * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
-      }
-      const touch = (1 - Math.exp(-wall * BLOCK.touchK)) * Math.max(0.3, BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv);
+      // 打ち分け：テクニックが高いほどブロックの手に当てずに打てる
+      const touch = (1 - Math.exp(-wall * BLOCK.touchK)) * clamp(BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv, 0.2, 1);
       const blockPower = BLOCK.power.base + Math.max(...blockers.map(b =>
         this.blockSkill(b.cp, b.sc) * BLOCK.power.block + (b.reachCm - hitCm) * BLOCK.power.height * this.w.physical))
         + (blockers.length - 1) * BLOCK.power.extra;
@@ -825,7 +832,7 @@ class RallySim {
         const main = blockers[0];
         const contact = this.world(opp, { u: 0.15, v: -sb.hit.v }, main.reachCm / 100 - 0.1);
         this.ballTo(contact, tBlock, 'spike');
-        const pKill = sigmoid((blockPower - power) / BLOCK.killScale + BLOCK.killBase);
+        const pKill = sigmoid((blockPower - power - tech * BLOCK.killTech) / BLOCK.killScale + BLOCK.killBase);
         if (this.rng.chance(pKill)) return this.blockKill(sb, main, tBlock);
         if (this.rng.chance(BLOCK.blockOutBase * (tech / 50))) {
           const out: Local = this.rng.chance(0.5)
@@ -1025,6 +1032,11 @@ export function serveTypeOf(p: Player): ServeType {
   if (canDo(p, 'spikeServe')) return 'spike';
   if (canDo(p, 'jumpFloat')) return 'jumpFloat';
   return 'float';
+}
+
+/** 打球を読んで動き出すまでの時間（テクニックから。男女の重みを掛けた値を渡す） */
+function readTime(tech: number): number {
+  return clamp(BODY.readMax - ((BODY.readMax - BODY.readMin) * tech) / 100, BODY.readFloor, BODY.readMax);
 }
 
 /** ブロックの読みの速さ（ブロック能力から） */

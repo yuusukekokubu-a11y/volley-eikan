@@ -16,7 +16,7 @@ export const COURT = {
 // 能力値は同じ尺度のまま、試合計算で「どれだけ効くか」を変える。
 export const GENDER_WEIGHTS: Record<Gender, { physical: number; skill: number; tactic: number }> = {
   male: { physical: 1.0, skill: 1.0, tactic: 1.0 },
-  female: { physical: 0.75, skill: 1.2, tactic: 1.4 },
+  female: { physical: 0.75, skill: 1.35, tactic: 1.4 },
 };
 
 // ---------------- 体と能力 ----------------
@@ -40,9 +40,10 @@ export const BODY = {
   /** 横移動（ブロック）の速さ */
   sideSpeedMin: 2.0,
   sideSpeedMax: 4.5,
-  /** 反応の遅れ：スピード0→max、100→min */
-  reactionMax: 0.26,
-  reactionMin: 0.14,
+  /** 打球を読んで動き出すまでの時間：テクニック0→readMax、100→readMin（下限 readFloor） */
+  readMax: 0.36,
+  readMin: 0.08,
+  readFloor: 0.05,
   /** 飛びつきで届く追加の距離 */
   lunge: 1.0,
   /** 跳んで着地した後、次に動き出せるまでの時間 */
@@ -128,7 +129,7 @@ export const SERVE = {
 export const PASS = {
   /** 質の計算 z = (技量 - 威力)/scale + base + ばらつき。質 p = sigmoid(z) */
   scale: 18,
-  base: { serve: -0.3, spike: -1.3, tip: 0.6, oneTouch: 0.6, freeball: 2.4, overpass: 2.0, cover: 0 },
+  base: { serve: -0.3, spike: -1.3, tip: 1.2, oneTouch: 0.6, freeball: 2.4, overpass: 2.0, cover: 0 },
   noise: 1.2,
   /** p がこれ未満ならボールを上げられない */
   failBelow: 0.1,
@@ -201,7 +202,9 @@ export const ATTACK = {
   softBase: 0.08,
   softBadSet: 0.3,
   softBadSetFrom: 0.9,
-  softHighBlock: 0.12,
+  /** ブロックの壁を読んで軟打に切り替える強さ：+ softRead × min(壁, softReadWallMax) × テクニック/100 */
+  softRead: 0.22,
+  softReadWallMax: 1.2,
   /** 軟打の攻撃力の割合 */
   softPowerRatio: 0.35,
   /** ネットを越えるために必要な余裕（m） */
@@ -236,11 +239,13 @@ export const BLOCK = {
   touchK: 1.3,
   heightFactorDivCm: 50,
   /** 打ち手のテクニックで触られにくくなる */
-  touchTechPivot: 1.2,
-  touchTechDiv: 250,
+  touchTechPivot: 1.45,
+  touchTechDiv: 110,
   /** 触った時：シャット確率 = sigmoid((ブロック力-攻撃力)/killScale + killBase) */
   killScale: 12,
-  killBase: -1.4,
+  killBase: 0.65,
+  /** シャットの勝負で、打ち手のテクニック（ずらして当てる上手さ）が攻撃力に足される量 */
+  killTech: 0.45,
   power: { base: 30, block: 0.5, height: 0.4, extra: 5 },
   /** ブロックアウトの確率（打ち手テクニック50の時） */
   blockOutBase: 0.12,
