@@ -96,7 +96,8 @@ export const TIMING = {
   spikeSpeedPerPower: 0.3,
   jumpRise: 0.35,
   jumpTotal: 0.75,
-  approach: 0.7,
+  /** スパイクの助走の長さ（動き出しから踏み切りの着地まで）。記録の見た目だけで結果には影響しない */
+  approach: 1.05,
   blockRise: 0.3,
   blockTotal: 0.65,
   endPause: 1.0,
@@ -281,6 +282,16 @@ export const LOAD = {
   dig: 0.5,
   set: 0.3,
   perMeter: 0.05,
+};
+
+// ---------------- 記録の書き方（結果には影響しない） ----------------
+export const RECORD = {
+  /** レシーブ・ディグで、触る点から体の立ち位置をずらす距離（腕の長さ分） */
+  standOffset: 0.5,
+  /** 飛びつきの時（体が前に倒れ込むので長め） */
+  diveStandOffset: 0.9,
+  /** 立ち位置はネットからこの距離より手前にしない */
+  minU: 0.3,
 };
 
 /** 安全のための打数の上限（無限ラリー防止） */

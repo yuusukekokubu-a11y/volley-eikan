@@ -10,7 +10,7 @@ import {
   sideSpeed, standingReachCm, type AbilityKey,
 } from './ability';
 import {
-  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, DEFENSE_POS, DIRECT, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
+  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
   MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SET, SET_TARGET, TACTIC_FIT, TIMING,
 } from './constants';
 import { Rng } from './rng';
@@ -57,6 +57,8 @@ interface Incoming {
 /** 1本目で上がったボール */
 interface BallUp {
   team: TeamId;
+  /** 1本目に触った時刻 */
+  tPass: number;
   t: number;
   at: Local;
   offset: number;
@@ -268,6 +270,12 @@ class RallySim {
     const sp = this.eff(c, 'speed');
     return Math.max(0, time - readTime(this.skill(c, ['dig']))) * runSpeed(sp) + BODY.lunge;
   }
+  /** ボールを受ける選手が動き出す時刻：動ける状態になってから、打球を読む時間（テクニック）の後 */
+  private moveStart(c: CourtPlayer, inc: Incoming): number {
+    const free = inc.tArrive - this.timeToReact(c, inc.tArrive, inc.flight);
+    return free + readTime(this.skill(c, ['dig']));
+  }
+
   /** ボールが来るまでに使える時間（跳んだ後の着地と立て直しを差し引く） */
   private timeToReact(c: CourtPlayer, tArrive: number, flight: number): number {
     const free = (this.busyUntil.get(c.p.id) ?? -Infinity) + BODY.landingRecovery;
@@ -286,21 +294,57 @@ class RallySim {
     return { x: round(p.x), y: round(p.y) };
   }
 
-  private moveTo(c: CourtPlayer, to: Local, t: number, opts: { arriveBy?: number; dur?: number } = {}) {
+  /**
+   * 移動を記録する。
+   *   asap：t に全力で動き出す（ボールに関わる選手）。arriveBy までに着かない時は arriveBy まで走り続ける
+   *   asap なし＋arriveBy：間に合う範囲でなるべく遅く動き出し、arriveBy に着く（助走・おとりなど時刻の決まった動き）
+   *   stand：記録する体の立ち位置（ボールに触る点から腕の長さ分ずらした位置）。
+   *          計算で使う位置（届くかどうかなどの判定）は to のまま
+   */
+  private moveTo(c: CourtPlayer, to: Local, t: number,
+    opts: { arriveBy?: number; dur?: number; asap?: boolean; stand?: Local } = {}) {
     const from = this.pos.get(c.p.id)!;
     const d = dist(from, to);
-    if (d < 0.05) return;
+    if (d < 0.05 && !opts.stand) return;
     const natural = d / runSpeed(this.eff(c, 'speed'));
     let dur = opts.dur ?? Math.max(0.15, natural);
     let start = t;
-    if (opts.arriveBy !== undefined) {
-      // 間に合う範囲でなるべく遅く動き出し、必ず arriveBy に着く
+    if (opts.asap) {
+      if (opts.arriveBy !== undefined) {
+        start = Math.min(start, opts.arriveBy - 0.12);
+        if (start + dur > opts.arriveBy) dur = opts.arriveBy - start;
+      }
+    } else if (opts.arriveBy !== undefined) {
       start = Math.min(Math.max(t, opts.arriveBy - natural), opts.arriveBy - 0.12);
       dur = opts.arriveBy - start;
     }
-    this.events.push({ type: 'move', t: round(start), playerId: c.p.id, to: this.w2(c.team, to), dur: round(dur) });
+    const shown = opts.stand ?? to;
+    // 新しく決まった移動は、それより後に始まる予定だった移動を取り消す（記録の上での予定の上書き）
+    this.events = this.events.filter(e => !(e.type === 'move' && e.playerId === c.p.id && e.t > start + 1e-9));
+    this.events.push({ type: 'move', t: round(start), playerId: c.p.id, to: this.w2(c.team, shown), dur: round(Math.max(0.12, dur)) });
     this.pos.set(c.p.id, { ...to });
     this.load[c.p.id] += d * LOAD.perMeter;
+  }
+
+  /** 世界座標 → チームの自コート基準 */
+  private local(team: TeamId, p: Vec3): Local {
+    return team === 'A' ? { u: -p.x, v: p.y } : { u: p.x, v: -p.y };
+  }
+
+  /**
+   * ボールに触る時の体の立ち位置。触る点から、ボールが進んでくる向きの先へ腕の長さ分ずらす。
+   * コートの外やネットの向こうにはしない。
+   */
+  private standFor(team: TeamId, contact: Local, comingFrom: Vec3, offset: number): Local {
+    const f = this.local(team, comingFrom);
+    let du = contact.u - f.u;
+    let dv = contact.v - f.v;
+    const n = Math.hypot(du, dv);
+    if (n < 1e-6) { du = 1; dv = 0; } else { du /= n; dv /= n; }
+    return {
+      u: clamp(contact.u + du * offset, RECORD.minU, COURT.halfLength),
+      v: clamp(contact.v + dv * offset, -COURT.halfWidth, COURT.halfWidth),
+    };
   }
 
   private jump(c: CourtPlayer, t: number, dur: number, heightM: number) {
@@ -538,7 +582,8 @@ class RallySim {
       if (best) {
         const from = this.pos.get(best.c.p.id)!;
         const k = Math.min(1, best.reach / Math.max(best.d, 0.01));
-        this.moveTo(best.c, { u: from.u + (inc.land.u - from.u) * k, v: from.v + (inc.land.v - from.v) * k }, inc.tArrive - inc.flight + 0.2, { arriveBy: inc.tArrive });
+        this.moveTo(best.c, { u: from.u + (inc.land.u - from.u) * k, v: from.v + (inc.land.v - from.v) * k },
+          this.moveStart(best.c, inc), { arriveBy: inc.tArrive, asap: true });
       }
       this.land(landW, inc.tArrive, inc.ballKind, inc.apex);
       return this.point(opp, inc.dropReason, inc.tArrive, inc.dropKey);
@@ -563,7 +608,9 @@ class RallySim {
     const p = sigmoid((sk - inc.pressure) / PASS.scale + PASS.base[baseKey] + this.rng.normal() * (PASS.noise + inc.shake));
     const z = dive ? PASS.contactZ.dive : isServe ? PASS.contactZ.receive : PASS.contactZ.dig;
 
-    this.moveTo(c, inc.land, inc.tArrive - inc.flight + 0.1, { arriveBy: inc.tArrive });
+    // 反応したらすぐ全力で動き出し、間に合えば先に着いて構える。触る点の手前（ボールが来る側の反対）に立つ
+    const stand = this.standFor(team, inc.land, this.ballPos, dive ? RECORD.diveStandOffset : RECORD.standOffset);
+    this.moveTo(c, inc.land, this.moveStart(c, inc), { arriveBy: inc.tArrive, asap: true, stand });
     this.ballTo(this.world(team, inc.land, z), inc.tArrive, inc.ballKind, inc.apex);
     this.touches++;
     if (!isServe) this.load[c.p.id] += LOAD.dig;
@@ -605,7 +652,7 @@ class RallySim {
     // 相手は守備の隊形、こちらは攻撃の準備
     this.defenseBase(opp, inc.tArrive + 0.1);
     this.attackBase(team, inc.tArrive + 0.15, new Set([c.p.id]));
-    return { kind: 'ballUp', bu: { team, t: tUp, at, offset, spin, firstToucher: c.p.id } };
+    return { kind: 'ballUp', bu: { team, tPass: inc.tArrive, t: tUp, at, offset, spin, firstToucher: c.p.id } };
   }
 
   // ============================================================
@@ -629,7 +676,8 @@ class RallySim {
         return db < da ? b : a;
       });
     }
-    this.moveTo(tosser, bu.at, bu.t - 1.0, { arriveBy: bu.t });
+    // パスが上がったら（読む時間の後）すぐ落下点へ動き、着いてからトスの構え
+    this.moveTo(tosser, bu.at, bu.tPass + readTime(this.skill(tosser, ['set'])), { arriveBy: bu.t, asap: true });
 
     // 攻撃の選択肢
     const fs = this.frontSlots(team);
@@ -697,7 +745,8 @@ class RallySim {
     this.ballTo(this.world(team, hit, hitZ), tHit, 'set', hitZ + TIMING.setApexAbove[setType] + (useSetter ? 0 : 0.5));
 
     // 打ち手の助走、ほかの前衛はおとりの動き
-    this.moveTo(attacker, { u: hit.u + 0.3, v: hit.v }, tHit - TIMING.approach, { arriveBy: tHit - TIMING.jumpRise });
+    // 助走：決まった時刻に動き出し、踏み切り（ジャンプの始まり）に着く
+    this.moveTo(attacker, { u: hit.u + 0.3, v: hit.v }, tHit - TIMING.approach, { arriveBy: tHit - TIMING.jumpRise, dur: TIMING.approach - TIMING.jumpRise, asap: true });
     for (const [c] of fs) {
       if (c === attacker || c === tosser || c.role === 'S' || c.role === 'L') continue;
       const p = this.pos.get(c.p.id)!;
@@ -922,7 +971,9 @@ class RallySim {
       const late = tNeed - tAvail;
       if (late > BLOCK.lateLimit) return;
       const timing = late <= 0 ? 1 : 1 - (late / BLOCK.lateLimit) * BLOCK.latePenalty;
-      this.moveTo(c, spot, sb.tSet + react, { arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15) });
+      this.moveTo(c, spot, sb.tSet + react, {
+        arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15), asap: true, dur: Math.abs(spot.v - p.v) / sideSpeed(sp),
+      });
       res.push({ cp: c, sc, spot, timing, reachCm: this.blockCm(c) - (1 - timing) * 20 });
     });
     // ブロックに跳ばない前衛は下がってフェイントや強打に備える
@@ -1008,7 +1059,8 @@ class RallySim {
     const chance = cover ? clamp(BLOCK.coverChance * this.skill(cover.c, ['cover']) / 50, 0, 0.6) : 0;
     if (cover && cover.m >= 0 && this.rng.chance(chance)) {
       const c = cover.c;
-      this.moveTo(c, land, tBlock, { arriveBy: tLand });
+      const stand = this.standFor(team, land, this.ballPos, RECORD.diveStandOffset);
+      this.moveTo(c, land, tBlock + readTime(this.skill(c, ['dig'])), { arriveBy: tLand, asap: true, stand });
       this.ballTo(this.world(team, land, 0.4), tLand, 'blockRebound');
       this.act(c, tLand, 'cover', land, 0.4);
       this.touches++;
@@ -1020,7 +1072,7 @@ class RallySim {
       this.ballTo(this.world(team, at, 2.3), tUp, 'pass', 3.8);
       this.attackBase(team, tLand + 0.1, new Set([c.p.id]));
       this.defenseBase(other(team), tLand);
-      return { kind: 'ballUp', bu: { team, t: tUp, at, offset, spin: 0.5, firstToucher: c.p.id } };
+      return { kind: 'ballUp', bu: { team, tPass: tLand, t: tUp, at, offset, spin: 0.5, firstToucher: c.p.id } };
     }
     this.land(this.world(team, land), tLand, 'blockRebound');
     return this.point(other(team), 'blockKill', tLand, main.cp.p.id);
