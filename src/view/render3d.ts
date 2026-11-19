@@ -5,8 +5,7 @@
 import * as THREE from 'three';
 import { COURT } from '../sim/constants';
 import type { Gender } from '../sim/types';
-import { canvasTexture, v3, type Figure, type FigureKind } from './figure';
-import { FigureA } from './figureA';
+import { canvasTexture, v3, type Figure } from './figure';
 import { FigureB } from './figureB';
 import { Motion } from './motion';
 import type { Frame, PlayerFrame } from './playback';
@@ -21,7 +20,6 @@ export class Render3D {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(30, 2, 0.1, 200);
   private players = new Map<string, PlayerView>();
-  private kind: FigureKind = 'A';
   private ball: THREE.Mesh;
   private ballShadow: THREE.Mesh;
   private net = new THREE.Group();
@@ -107,14 +105,8 @@ export class Render3D {
     this.lastT = 0;
   }
 
-  /** 人形の見た目を切り替える（A：肘付き、B：デフォルメ体型。比較用の一時的な切り替え） */
-  setFigure(kind: FigureKind) {
-    this.kind = kind;
-    this.reset();
-  }
-
   private makeFigure(pl: PlayerFrame): Figure {
-    return this.kind === 'A' ? new FigureA(pl) : new FigureB(pl);
+    return new FigureB(pl);
   }
 
   private buildCourt() {

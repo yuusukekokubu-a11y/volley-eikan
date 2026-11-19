@@ -1,16 +1,13 @@
-// 選手の人形の見た目に共通の部品。見た目は A（肘付き）と B（デフォルメ体型）の2種類（比較が終わったら片方を消す）。
+// 選手の人形に使う部品（影・背番号・頭でボールを追う・手の置き場所など）。
 
 import * as THREE from 'three';
 import type { MotionState } from './motion';
 import { clampN } from './motion';
 import type { Frame, PlayerFrame } from './playback';
 
-export type FigureKind = 'A' | 'B';
-
 /** 計算の座標 (x, y, z) → Three.js（y が上）の (x, z, -y) */
 export const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y);
 
-export const DOWN = new THREE.Vector3(0, -1, 0);
 export const BALL_R = 0.13;
 
 export interface Figure {

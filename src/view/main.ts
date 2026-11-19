@@ -3,8 +3,8 @@
 import { simulateRally } from '../sim/rally';
 import { makeTeam, rotate } from '../sim/sample';
 import type { Gender, TeamId, TeamState } from '../sim/types';
+import { PLAYBACK_RATE } from './common';
 import { Playback, pointText } from './playback';
-import type { FigureKind } from './figure';
 import { Render3D } from './render3d';
 
 const SPEEDS = [1, 2, 4];
@@ -68,7 +68,8 @@ let last = performance.now();
 function tick(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (playing) t += dt * SPEEDS[speedIdx];
+  // 「1倍」は現実の速さ×PLAYBACK_RATE（少しゆっくり）。2倍・4倍もこれが基準
+  if (playing) t += dt * SPEEDS[speedIdx] * PLAYBACK_RATE;
   const fr = pb.frame(Math.min(t, pb.duration));
   if (fr.point && !counted) {
     counted = true;
@@ -108,31 +109,9 @@ $('btnNext').onclick = () => {
 $('btnGender').onclick = () => {
   gender = gender === 'male' ? 'female' : 'male';
   $('btnGender').textContent = gender === 'male' ? '男子' : '女子';
-
-// 人形の見た目の比較（A：肘付き／B：デフォルメ体型）。比較が終わったら片方を消す一時的な切り替え
-let figure: FigureKind = params.get('fig') === 'b' ? 'B' : 'A';
-const showFigure = () => { $('btnFigure').textContent = `見た目${figure}`; };
-r3.setFigure(figure);
-showFigure();
-$('btnFigure').onclick = () => {
-  figure = figure === 'A' ? 'B' : 'A';
-  r3.setFigure(figure);
-  showFigure();
-};
   resetMatch();
 };
 $('btnGender').textContent = gender === 'male' ? '男子' : '女子';
-
-// 人形の見た目の比較（A：肘付き／B：デフォルメ体型）。比較が終わったら片方を消す一時的な切り替え
-let figure: FigureKind = params.get('fig') === 'b' ? 'B' : 'A';
-const showFigure = () => { $('btnFigure').textContent = `見た目${figure}`; };
-r3.setFigure(figure);
-showFigure();
-$('btnFigure').onclick = () => {
-  figure = figure === 'A' ? 'B' : 'A';
-  r3.setFigure(figure);
-  showFigure();
-};
 window.addEventListener('resize', layout);
 
 resetMatch();
