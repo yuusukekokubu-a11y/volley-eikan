@@ -148,6 +148,8 @@ class RallySim {
       else step = this.attack(step.sb);
     }
     const r = this.result!;
+    // ラリーが終わった後に始まる予定だった移動は記録しない
+    this.events = this.events.filter(e => !(e.type === 'move' && e.t > r.t));
     this.events.sort((a, b) => a.t - b.t);
     return {
       seed: this.input.seed,
@@ -633,6 +635,10 @@ class RallySim {
     const p = sigmoid((sk - inc.pressure) / PASS.scale + PASS.base[baseKey] + this.rng.normal() * (PASS.noise + inc.shake));
     const z = dive ? PASS.contactZ.dive : isServe ? PASS.contactZ.receive : PASS.contactZ.dig;
 
+    // セッター：誰が1本目を触るか決まったら、パスを待たずにセットする位置へ走り出す（相手が打った時点で、読む時間の後）
+    const setter = this.court[team].find(x => x.role === 'S');
+    if (setter && setter !== c) this.moveTo(setter, SET_TARGET, this.moveStart(setter, inc), { asap: true });
+
     // 反応したらすぐ全力で動き出し、間に合えば先に着いて構える。触る点の手前（ボールが来る側の反対）に立つ
     const stand = this.standFor(team, inc.land, this.ballPos, dive ? RECORD.diveStandOffset : RECORD.standOffset);
     this.moveTo(c, inc.land, this.moveStart(c, inc), { arriveBy: inc.tArrive, asap: true, stand });
@@ -674,11 +680,6 @@ class RallySim {
     const tUp = inc.tArrive + TIMING.passFlight + offset * TIMING.passFlightPerOffset;
     this.ballTo(this.world(team, at, 2.3), tUp, 'pass', 3.6 + offset * 0.4);
 
-    // セッター：パスが届く範囲なら、パスを待たずにセットする位置へ走り出す（相手が打った時点で、読む時間の後）
-    const setter = this.court[team].find(x => x.role === 'S');
-    if (setter && setter !== c && offset <= SET.setterReach) {
-      this.moveTo(setter, SET_TARGET, this.moveStart(setter, inc), { asap: true });
-    }
     // 相手は守備の隊形、こちらは攻撃の準備。触らない選手は相手が打った時点で動き出す
     this.defenseBase(opp, inc.tArrive, true);
     this.attackBase(team, x => this.moveStart(x, inc), new Set([c.p.id]));
@@ -695,19 +696,34 @@ class RallySim {
     const ts = this.input.teams[team];
     const list = this.court[team];
     const setter = list.find(c => c.role === 'S');
-    const useSetter = !!setter && setter.p.id !== bu.firstToucher && bu.offset <= SET.setterReach;
+    // セッターは走っている途中でパスの落下点へ向きを変えて追う。間に合えばセッターが上げ、
+    // 間に合わなければ（届く所まで追うだけで）、パスが上がった時点で落下点に一番近い選手が二段トスを上げる
+    const chase = (c: CourtPlayer) => {
+      const start = this.freeAt(c, bu.tPass) + readTime(this.skill(c, ['set']));
+      const from = this.posAt(c, start);
+      const d = dist(from, bu.at);
+      const reach = Math.max(0, bu.t - start) * runSpeed(this.eff(c, 'speed')) + SET.setterLunge;
+      return { start, from, d, ok: d <= reach, reach };
+    };
+    let useSetter = false;
+    if (setter && setter.p.id !== bu.firstToucher) {
+      const ch = chase(setter);
+      useSetter = ch.ok;
+      if (!ch.ok) {
+        const k = Math.max(0, ch.reach - SET.setterLunge) / Math.max(ch.d, 1e-6);
+        const stop = { u: ch.from.u + (bu.at.u - ch.from.u) * k, v: ch.from.v + (bu.at.v - ch.from.v) * k };
+        this.moveTo(setter, stop, ch.start, { arriveBy: bu.t, asap: true });
+      }
+    }
     let tosser: CourtPlayer;
     if (useSetter) tosser = setter!;
     else {
-      const pool = list.filter(c => c.p.id !== bu.firstToucher);
-      tosser = pool.reduce((a, b) => {
-        const da = dist(this.pos.get(a.p.id)!, bu.at) - (a.role === 'L' ? 1 : 0);
-        const db = dist(this.pos.get(b.p.id)!, bu.at) - (b.role === 'L' ? 1 : 0);
-        return db < da ? b : a;
-      });
+      const pool = list.filter(c => c.p.id !== bu.firstToucher && c !== setter);
+      const near = (c: CourtPlayer) => dist(this.posAt(c, bu.tPass), bu.at) - (c.role === 'L' ? 1 : 0);
+      tosser = pool.reduce((a, b) => (near(b) < near(a) ? b : a));
     }
     // パスが上がったら（読む時間の後）すぐ落下点へ動き、着いてからトスの構え
-    this.moveTo(tosser, bu.at, bu.tPass + readTime(this.skill(tosser, ['set'])), { arriveBy: bu.t, asap: true });
+    this.moveTo(tosser, bu.at, this.freeAt(tosser, bu.tPass) + readTime(this.skill(tosser, ['set'])), { arriveBy: bu.t, asap: true });
 
     // 攻撃の選択肢
     const fs = this.frontSlots(team);

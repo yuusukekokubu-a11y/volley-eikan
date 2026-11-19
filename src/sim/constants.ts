@@ -155,8 +155,8 @@ export const PASS = {
 
 // ---------------- トス ----------------
 export const SET = {
-  /** セッターが届くずれの上限。超えたら他の選手が二段トス */
-  setterReach: 3.5,
+  /** セッターがパスの落下点まで走って、最後に手を伸ばして届く追加の距離（m）。届かなければ他の選手が二段トス */
+  setterLunge: 0.5,
   /** 攻撃の種類ごとの、使えるずれの上限 */
   maxOffset: { quick: 1.0, timeDiff: 0.8, fast: 2.0, high: 99 } as Record<SetType, number>,
   /** トスのずれ（m）＝|N|×base×(1+offset×offsetK+spin×spinK)×(skillPivot - 技量/100) */
