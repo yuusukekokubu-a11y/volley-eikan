@@ -83,10 +83,10 @@ export const TIMING = {
   serveFlight: { float: 1.35, jumpFloat: 1.2, spike: 0.9 } as Record<ServeType, number>,
   passFlight: 1.1,
   passFlightPerOffset: 0.08,
-  setFlight: { quick: 0.35, timeDiff: 0.7, fast: 0.55, high: 1.65 } as Record<SetType, number>,
+  setFlight: { quick: 0.35, timeDiff: 0.7, fast: 0.55, high: 1.65, back: 0.95, broad: 0.6 } as Record<SetType, number>,
   secondarySetExtra: 0.2,
   /** トスの最高点が打点よりどれだけ上か（m） */
-  setApexAbove: { quick: 0.25, timeDiff: 0.7, fast: 0.6, high: 3.0 } as Record<SetType, number>,
+  setApexAbove: { quick: 0.25, timeDiff: 0.7, fast: 0.6, high: 3.0, back: 1.2, broad: 0.45 } as Record<SetType, number>,
   tipFlight: 0.95,
   freeballFlight: 1.5,
   overpassFlight: 1.2,
@@ -189,7 +189,7 @@ export const SET = {
   /** セッターがパスの落下点まで走って、最後に手を伸ばして届く追加の距離（m）。届かなければ他の選手が二段トス */
   setterLunge: 0.5,
   /** 攻撃の種類ごとの、使えるずれの上限 */
-  maxOffset: { quick: 1.0, timeDiff: 0.8, fast: 2.0, high: 99 } as Record<SetType, number>,
+  maxOffset: { quick: 1.0, timeDiff: 0.8, fast: 2.0, high: 99, back: 1.5, broad: 0.9 } as Record<SetType, number>,
   /** トスのずれ（m）＝|N|×base×(1+offset×offsetK+spin×spinK)×(skillPivot - 技量/100) */
   errBase: 0.28,
   errOffsetK: 0.9,
@@ -207,9 +207,9 @@ export const SET = {
   setFault: 3.2,
   /** 作戦ごとの攻撃の種類の重み */
   tacticWeights: {
-    ace: { quick: 0.12, timeDiff: 0.04, fast: 0.14, high: 0.7 },
-    balance: { quick: 0.25, timeDiff: 0.1, fast: 0.3, high: 0.35 },
-    quick: { quick: 0.42, timeDiff: 0.25, fast: 0.2, high: 0.13 },
+    ace: { quick: 0.12, timeDiff: 0.04, fast: 0.14, high: 0.7, back: 0.1, broad: 0.04 },
+    balance: { quick: 0.25, timeDiff: 0.1, fast: 0.3, high: 0.35, back: 0.12, broad: 0.1 },
+    quick: { quick: 0.42, timeDiff: 0.25, fast: 0.2, high: 0.13, back: 0.08, broad: 0.2 },
   } as Record<AttackTactic, Record<SetType, number>>,
   /** 配球の判断：ブロックが薄そうな攻撃ほど選びやすくなる強さ（テクニック100で最大） */
   choiceK: 0.9,
@@ -241,7 +241,7 @@ export const ATTACK = {
   /** ダイレクトはトスに合わせて打つより難しい分の罰 */
   directPenalty: 6,
   /** 守る側が打球を読みにくい分の遅れ（秒）。トスが速いほど構え直す時間がない（オープンは0） */
-  readDelay: { quick: 0.17, timeDiff: 0.14, fast: 0.12, high: 0 } as Record<SetType, number>,
+  readDelay: { quick: 0.17, timeDiff: 0.14, fast: 0.12, high: 0, back: 0.06, broad: 0.14 } as Record<SetType, number>,
   /** 軟打・フェイントを選ぶ確率 */
   softBase: 0.08,
   softBadSet: 0.3,
@@ -311,7 +311,7 @@ export const APPROACH = {
   /** アウトサイド・オポジットは、打つレーンより外側（サイドライン寄り）から斜めに入る */
   wingOutside: 0.6,
   /** 十分な助走の長さ（m）。これより短いと跳ぶ高さが下がる */
-  fullLen: { quick: 1.6, timeDiff: 1.6, fast: 2.6, high: 2.9 } as Record<SetType, number>,
+  fullLen: { quick: 1.6, timeDiff: 1.6, fast: 2.6, high: 2.9, back: 2.6, broad: 2.4 } as Record<SetType, number>,
   /** 助走の平均の速さ（m/s）＝ base ＋ スピード × per */
   speedBase: 1.7,
   speedPer: 0.024,
@@ -477,25 +477,44 @@ export const STYLE = {
   },
   /** ショート多め／ロング多め：サーブの狙う深さ（u の範囲） */
   serveLength: { short: [1.5, 5.0], long: [5.5, 8.6] } as Record<'short' | 'long', [number, number]>,
+  /** ショートはネットにかけやすい（ミスの率の倍率）。ロングは深く押し込む分、強さが少し増える */
+  serveLengthFault: { short: 1.15, long: 1 },
+  serveLengthPressure: { short: 0, long: 3 },
   /** 人狙い：一番レシーブの弱い選手の正面を狙う。つなぎ目狙い：選手と選手の間を強く狙う（候補を増やす） */
   seamExtraCandidates: 2,
   /** スパイクのコース：ストレートに打つ割合（好みなし・ストレート好み・クロス好み）。サイドから打つ時だけ */
   straightShare: { none: 0.4, straight: 0.7, cross: 0.15 },
+  /**
+   * コースごとの性質。ストレートはサイドライン際でアウトしやすく、間に合ったブロックには外の手で止められやすいが、
+   * 遅れたブロックの外を抜きやすい（ブロックの遅い相手に得）。クロスはコートが長く入りやすい（ブロックの揃う相手に得）
+   */
+  course: {
+    straight: { err: 1.35, wallOnTime: 1.3, wallLate: 0.7 },
+    cross: { err: 0.85, wallOnTime: 1, wallLate: 1 },
+  },
   /** サイドから打つとみなすレーンの |v| */
   sideLaneV: 1.5,
   /** コース読み：相手アタッカーのコースの好みが当たると、ブロックの壁がこの倍率で厚くなる */
   courseReadWall: 1.3,
   /** 強打志向／軟打志向：軟打に切り替える割合の倍率 */
-  softRate: { hard: 0.55, soft: 1.6 },
-  /** コミット寄り／リード寄り：時間差のフェイクに掛かる割合の倍率と、速攻への反応の早さ（秒、マイナスほど早い） */
+  softRate: { hard: 0.65, soft: 1.35 },
+  /** 軟打志向は軟打の落とし所がうまい（狙いの候補を増やす） */
+  softTipCandidates: 3,
+  /**
+   * コミット寄り／リード寄り：時間差のフェイクに掛かる割合の倍率と、反応の早さ（秒、マイナスほど早い）。
+   * コミットは速攻に早いがサイドに遅れる（速攻の多い相手に得）。リードはその逆（エース中心の相手に得）
+   */
   blocking: {
-    commit: { bite: 1.6, quickReact: -0.08 },
-    read: { bite: 0.5, quickReact: 0.05 },
+    commit: { bite: 1.5, quickReact: -0.06, sideReact: 0.08 },
+    read: { bite: 0.6, quickReact: 0.03, sideReact: -0.07 },
   },
-  /** 積極守備／消極守備：届く距離（m）の増減と、レシーブの技量の増減 */
+  /**
+   * 積極守備／消極守備：届く距離（m）、打球の強さに比例した技量の増減（強さ1あたり）、ばらつきの倍率。
+   * 積極は届く範囲が広いが強打を弾きやすい（フェイントの多い相手に得）。消極は範囲が狭いが強打も確実に上げる（強打の多い相手に得）
+   */
   defense: {
-    active: { reach: 0.4, skill: -4 },
-    passive: { reach: -0.3, skill: 4 },
+    active: { reach: 0.2, skillPerPressure: -0.2, noise: 1.25 },
+    passive: { reach: -0.1, skillPerPressure: 0.2, noise: 0.75 },
   },
   /** オーバー派／アンダー派：サーブレシーブの技量の増減（揺れるサーブ・強いサーブ） */
   receiving: {
@@ -529,3 +548,24 @@ export const SERVE_CHOICE = {
 
 /** 金特「エースの風格」：持ち主が決めると、チーム全体の全能力にこの段階を足す（ラリー数で切れる） */
 export const ACE_AURA = { delta: 1 as const, rallies: 3 };
+
+/** バックアタック（解禁型）：後衛のアウトサイド・オポジットが、アタックラインの後ろから踏み切って打つ */
+export const BACK_ATTACK = {
+  /** 打つ点のネットからの距離（踏み切りはこれより takeoffBack だけ後ろ。アタックライン3mより後ろ） */
+  hitU: 2.9,
+  /** 踏み切りの位置の下限（アタックラインを踏まない） */
+  minTakeoffU: 3.1,
+  /** 助走を始める位置（ネットからの距離） */
+  startU: 6.0,
+  /** レーン：アウトサイドはコートの真ん中（パイプ）、オポジットはライト側 */
+  laneOH: 0.6,
+  laneOP: -2.8,
+  /** トスより少し前から助走を始める（秒） */
+  lead: 0.5,
+  /** 回転をかけて弧を描く分、強打できるかの判定でこれだけネットに近い所から打つとみなす（m） */
+  arcU: 2.3,
+  /** 遠くから打つ分、打球の強さが下がる割合 */
+  powerRatio: 0.9,
+  /** ネットから離れて打つので、ブロックの手に当たりにくい（触る判定の壁の倍率） */
+  wallRatio: 0.6,
+};

@@ -173,6 +173,8 @@ export type BallKind =
 export type ActionType =
   | 'serve' | 'receive' | 'dig' | 'set' | 'spike' | 'tip' | 'block'
   | 'freeball' | 'cover' | 'fakeJump'
+  /** ツーアタック：セッターが2本目を片手で相手コートに落とす */
+  | 'dump'
   /** サーブトスを上げる */
   | 'toss';
 
@@ -203,7 +205,11 @@ export interface ActionInfo {
   direct?: boolean;
 }
 
-export type SetType = 'quick' | 'timeDiff' | 'fast' | 'high';
+/**
+ * トスの種類：速攻・時間差・平行・オープン・バックアタック（後衛がアタックラインの後ろから打つ）・
+ * ブロード（ミドルが横に走って片足で踏み切る移動攻撃）
+ */
+export type SetType = 'quick' | 'timeDiff' | 'fast' | 'high' | 'back' | 'broad';
 
 export type PointReason =
   | 'ace'            // サービスエース

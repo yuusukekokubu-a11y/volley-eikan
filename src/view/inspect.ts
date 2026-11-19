@@ -11,14 +11,34 @@ import { Render3D, type FollowView } from './render3d';
 
 type ActionEv = Extract<RallyEvent, { type: 'action' }>;
 
-/** 見たい動作：記録の動作の種類と、見始める時刻（動作の何秒前から） */
-const WANTED: { key: string; label: string; match: (e: ActionEv) => boolean; lead: number }[] = [
+/**
+ * リバウンド：軟打がブロックに当たって自分のコートに戻り、相手が触らないまま自チームが次に触る
+ * （記録の形は変えず、動作の並びで見分ける）
+ */
+function isRebound(e: ActionEv, r: RallyRecord): boolean {
+  if (e.action !== 'tip') return false;
+  const after = r.events.filter((x): x is ActionEv => x.type === 'action' && x.t > e.t);
+  const next = after.find(x => x.action !== 'block');
+  const team = r.placements.find(p => p.playerId === e.playerId)?.team;
+  const nextTeam = next && r.placements.find(p => p.playerId === next.playerId)?.team;
+  return !!next && after[0]?.action === 'block' && nextTeam === team;
+}
+
+/**
+ * 見たい動作：記録の動作の種類と、見始める時刻（動作の何秒前から）。
+ * trait があれば、探す前に赤チームにその特能を持たせる（解禁型の動作を見るため）
+ */
+const WANTED: { key: string; label: string; match: (e: ActionEv, r: RallyRecord) => boolean; lead: number; trait?: string }[] = [
   { key: 'spike', label: 'スパイク', match: e => e.action === 'spike' && !e.info?.direct, lead: 2.0 },
   { key: 'jserve', label: 'ジャンプサーブ', match: e => e.action === 'serve' && e.info?.serveType !== 'float', lead: 1.5 },
   { key: 'block', label: 'ブロック', match: e => e.action === 'block', lead: 1.6 },
   { key: 'receive', label: 'レシーブ', match: e => (e.action === 'receive' || e.action === 'dig') && e.pos.z > 0.3, lead: 1.8 },
   { key: 'dive', label: '飛びつき', match: e => (e.action === 'receive' || e.action === 'dig' || e.action === 'cover') && e.pos.z <= 0.3, lead: 1.6 },
   { key: 'set', label: 'トス', match: e => e.action === 'set', lead: 1.6 },
+  { key: 'back', label: 'バックアタック', match: e => e.action === 'spike' && e.info?.setType === 'back' && e.playerId.startsWith('A'), lead: 2.2, trait: 'backAttack' },
+  { key: 'dump', label: 'ツーアタック', match: e => e.action === 'dump' && e.playerId.startsWith('A'), lead: 2.0, trait: 'dump' },
+  { key: 'rebound', label: 'リバウンド', match: (e, r) => e.playerId.startsWith('A') && isRebound(e, r), lead: 2.0, trait: 'rebound' },
+  { key: 'broad', label: 'ブロード', match: e => e.action === 'spike' && e.info?.setType === 'broad' && e.playerId.startsWith('A'), lead: 2.2, trait: 'broad' },
 ];
 /** 再生の速さ（現実の速さの何倍か） */
 const SPEEDS = [0.1, 0.25, 0.5, 1];
@@ -33,7 +53,7 @@ const ACTION_NAME: Partial<Record<ActionType, string>> = {
   serve: 'サーブ', receive: 'レシーブ', dig: 'ディグ', set: 'トス', spike: 'スパイク', tip: 'フェイント',
   block: 'ブロック', freeball: 'つなぎ', cover: 'フォロー', fakeJump: '時間差のフェイク', toss: 'サーブトス',
 };
-const SET_NAME: Record<string, string> = { quick: '速攻', timeDiff: '時間差', fast: '平行', high: 'オープン' };
+const SET_NAME: Record<string, string> = { quick: '速攻', timeDiff: '時間差', fast: '平行', high: 'オープン', back: 'バックアタック', broad: 'ブロード' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
@@ -119,7 +139,7 @@ function findNext(key: string) {
   const after = (s: number) => (s === seed ? from + 0.01 : -1);
   for (let s = seed; s < seed + 400; s++) {
     const r = s === seed ? rec : rally(s);
-    const e = r.events.find((x): x is ActionEv => x.type === 'action' && x.t > after(s) && w.match(x));
+    const e = r.events.find((x): x is ActionEv => x.type === 'action' && x.t > after(s) && w.match(x, r));
     if (!e) continue;
     if (s !== seed) load(s);
     lastFound = { seed: s, t: e.t };
@@ -148,6 +168,8 @@ function buildActions() {
     b.textContent = w.label;
     b.onclick = () => {
       for (const c of Array.from(box.children)) c.classList.toggle('on', c === b);
+      // 解禁型の動作は、赤チームにその特能を持たせてから探す
+      if (w.trait && trait !== w.trait) { trait = w.trait; traitLabel(); load(seed); }
       findNext(w.key);
     };
     box.appendChild(b);
