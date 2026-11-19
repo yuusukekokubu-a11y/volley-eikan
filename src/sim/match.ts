@@ -119,7 +119,12 @@ export class SetGame {
       teams: { A: this.teamForRally('A'), B: this.teamForRally('B') },
       serving: this.serving,
       seed: this.seed * 1000 + this.rallies,
-      context: { setNumber: this.setNumber, isFinalSet: this.finalSet, score: { ...this.score } },
+      context: {
+        setNumber: this.setNumber, isFinalSet: this.finalSet, score: { ...this.score },
+        // 今のサーバーのサーブで続けて取っている点（サイドアウトで取った1点は含まない）
+        serveStreak: Math.max(0, this.lostStreak[other(this.serving)] - 1),
+        subbedIn: (['A', 'B'] as TeamId[]).flatMap(t => this.pairs[t].filter(x => x.status === 'in').map(x => x.subId)),
+      },
     };
     const rec = simulateRally(input);
     this.rallies++;

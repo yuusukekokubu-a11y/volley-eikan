@@ -11,6 +11,7 @@
 // 判断を良くする特能は「その判断の場面（serveAim / setChoice / blockRead など）で能力が上がる」形で書く。
 
 import type { AbilityKey } from './ability';
+import { TRAIT_EXTRA } from './constants';
 import type { Player, Role } from './types';
 
 /** 上下する値は固定の5段階（赤は同じ段階のマイナス） */
@@ -97,6 +98,8 @@ export interface StatTrait {
   roles?: Role[];
   /** 金特の場合、元になる青特能の ID（金を取ると青は置き換わる） */
   upgradeOf?: string;
+  /** その動作も解禁する（ジャンフロ◎などの上位版は◯を持っていなくても打てる） */
+  alsoUnlocks?: UnlockAction;
   /** 5段階で表せない効き（相談して決めたものだけ） */
   extra?: {
     /** 疲れのたまり方の倍率（全力・サボり屋） */
@@ -170,37 +173,119 @@ const style = <A extends StyleAxis>(id: string, name: string, axis: A, value: St
 const unlock = (id: string, name: string, unlocks: UnlockAction, roles?: Role[]): UnlockTrait =>
   ({ kind: 'unlock', id, name, unlocks, ...(roles ? { roles } : {}) });
 
+const SERVERS: AbilityKey[] = ['power', 'technique'];
+
 const LIST: TraitDef[] = [
-  // ---- 解禁 ----
+  // ================= 解禁 =================
   unlock('jumpFloat', 'ジャンフロ◯', 'jumpFloat'),
   unlock('spikeServe', 'スパイクサーブ◯', 'spikeServe'),
 
-  // ---- 青：全プレー ----
+  // ================= 青：全プレー =================
   blue('clutch', '勝負強い', each('clutch', ALL5, 5)),
+  blue('stable', '安定感', each('slump', ALL5, 3)),
 
-  // ---- 青：レシーブ ----
+  // ================= 青：サーブ =================
+  blue('weakSnipe', '弱点狙撃', each('serveAim', ['technique'], 10)),
+  blue('pinchServer', 'ピンチサーバー', each('pinchServe', SERVERS, 5)),
+  blue('jumpFloatPro', 'ジャンフロ◎', each('serveJumpFloat', ['technique'], 10), { alsoUnlocks: 'jumpFloat' }),
+  blue('spikeServePro', 'スパイクサーブ◎', each('serveSpike', ['power'], 10), { alsoUnlocks: 'spikeServe' }),
+  blue('serveStreak', '連続サーブ', each('serveStreak', SERVERS, 5)),
+
+  // ================= 青：攻撃 =================
+  blue('straightHit', 'ストレート◯', each('attackStraight', ['power', 'technique'], 5)),
+  blue('crossHit', 'クロス◯', each('attackCross', ['power', 'technique'], 5)),
+  blue('feint', 'フェイント', each('tip', ['technique'], 10)),
+  blue('blockOutHit', 'ブロックアウト', each('blockOut', ['technique'], 10)),
+  blue('secondHit', '二段打ち', each('attackSecondary', ['power', 'technique'], 5)),
+  blue('direct', 'ダイレクト', each('direct', ['power', 'technique'], 10)),
+
+  // ================= 青：ブロック =================
+  blue('courseRead', 'コース読み', each('blockRead', ['block'], 10)),
+  blue('reaction', '反応', each('blockQuick', ['block', 'speed'], 10)),
+  blue('oneTouch', 'ワンタッチ', each('blockTouch', ['block'], 10)),
+  blue('killBlock', 'キルブロック', each('blockKill', ['block'], 10)),
+  blue('blockFollow', 'ブロックフォロー', each('blockFollow', ['technique', 'speed'], 10)),
+
+  // ================= 青：レシーブ =================
+  blue('tipPick', 'フェイント拾い', each('digTip', ['technique', 'speed'], 10)),
   blue('receiveMaster', 'サーブレシーブ職人', each('serveReceive', ['technique'], 10)),
+  blue('digger', 'ディグ', each('dig', ['technique'], 10)),
+  blue('pancake', 'パンケーキ◯', each('dive', ['technique', 'speed'], 10)),
+  blue('shakeOk', '揺れ球◯', each('receiveFloat', ['technique'], 10)),
+  blue('softReceive', 'ソフトレシーブ', [...each('serveReceive', ['technique'], 5), ...each('dig', ['technique'], 5)]),
 
-  // ---- 青：セッター ----
+  // ================= 青：トス =================
+  blue('secondSet', '二段トス◯', each('setSecondary', ['technique'], 10)),
+
+  // ================= 青：セッター =================
+  blue('tossMaster', 'トス回し', each('set', ['technique'], 5), { roles: ['S'] }),
+  blue('combo', 'コンビ◯', each('setQuick', ['technique'], 10), { roles: ['S'] }),
   blue('setEye', '配球眼', each('setChoice', ['technique'], 10), { roles: ['S'] }),
+  blue('backSetPro', 'バックトス◯', each('setBack', ['technique'], 10), { roles: ['S'] }),
+  blue('badPassSet', '乱れ玉セット', each('setBadPass', ['technique'], 10), { roles: ['S'] }),
+  blue('handling', 'ハンドリング◯', each('setSpin', ['technique'], 10), { roles: ['S'] }),
 
-  // ---- 青：リベロ ----
+  // ================= 青：ミドル =================
+  blue('quickHit', '速攻', each('attackQuick', ['speed', 'technique'], 5), { roles: ['MB'] }),
+  blue('timeDiff', '時間差', each('attackTimeDiff', ['speed'], 10), { roles: ['MB'] }),
+  blue('command', '号令', each('block', ['block'], 5, 'frontRow'), { roles: ['MB'] }),
+
+  // ================= 青：リベロ =================
+  blue('underToss', 'アンダートス', each('setSecondary', ['technique'], 10), { roles: ['L'] }),
   blue('defenseCore', '守備の要', [
     ...each('serveReceive', ['technique'], 5, 'backRow'), ...each('dig', ['technique'], 5, 'backRow'),
   ], { roles: ['L'] }),
 
-  // ---- 赤 ----
+  // ================= 赤 =================
+  red('pressureWeak', 'プレッシャーに弱い', each('clutch', ALL5, -5)),
+  red('moody', 'ムラっ気', [...each('goodForm', ALL5, 3), ...each('slump', ALL5, -3)]),
+  red('serveMiss', 'サーブミス', each('serve', ['technique'], -5)),
+  red('serveTossBad', 'サーブトス×', [...each('serveJumpFloat', ['technique'], -10), ...each('serveSpike', ['technique'], -10)]),
+  red('badSetBad', '悪球打ち×', each('attackBadSet', ['power', 'technique'], -10)),
+  red('outMany', 'アウト多め', each('attack', ['technique'], -5), { extra: { attackMissSide: 'out' } }),
+  red('netMany', 'ネットにかける', each('attack', ['technique'], -5), { extra: { attackMissSide: 'net' } }),
+  red('fastSetBad', '速いトス×', each('attackQuick', ['technique'], -10)),
+  red('repeatBad', '連続トス×', each('attackRepeat', ['power', 'technique'], -5)),
+  red('feintObvious', 'フェイント見え見え', each('tip', ['technique'], -10)),
+  red('suckedIn', '吸い込まれ', each('blockKill', ['block'], -5)),
+  red('blockOutWeak', 'ブロックアウトされやすい', each('blockOutGuard', ['block'], -10)),
+  red('receiveBad', 'レシーブ苦手', [...each('serveReceive', ['technique'], -5), ...each('dig', ['technique'], -5)]),
+  red('serveReceiveBad', 'サーブレシーブ×', each('serveReceive', ['technique'], -10)),
+  red('hardBad', '強打レシーブ×', each('receiveHard', ['technique'], -10)),
   red('shakeWeak', '揺れ球×', each('receiveFloat', ['technique'], -10)),
+  // 配球バレ：相手ブロッカーがトスを読む時に、相手のブロックが上がる（効く相手はプラスだが、持ち主にとってはマイナス）
+  red('setTell', '配球バレ', each('blockRead', ['block'], 10, 'opponent')),
+  red('backSetBad', 'バックトス×', each('setBack', ['technique'], -10)),
+  red('badPassBad', '乱れ玉×', each('setBadPass', ['technique'], -10), { roles: ['S'] }),
+  red('handlingBad', 'ハンドリング×', each('setSpin', ['technique'], -10), { roles: ['S'] }),
 
-  // ---- その他（能力の偏り） ----
+  // ================= その他 =================
   other_('brute', '力任せ', [...each('all', ['power'], 5), ...each('all', ['technique'], -5)]),
   other_('finesse', '技巧派', [...each('all', ['power'], -5), ...each('all', ['technique'], 5)]),
+  other_('allOut', '全力', each('all', ALL5, 1), { extra: { fatigueMul: TRAIT_EXTRA.fatigueAllOut } }),
+  other_('slacker', 'サボり屋', each('all', ALL5, -1), { extra: { fatigueMul: TRAIT_EXTRA.fatigueSlacker } }),
 
-  // ---- 緑 ----
+  // ================= 緑 =================
   style('aggressiveServe', '強気サーブ', 'serveRisk', 'aggressive'),
   style('safeServe', '安全サーブ', 'serveRisk', 'safe'),
+  style('shortServe', 'ショート多め', 'serveLength', 'short'),
+  style('longServe', 'ロング多め', 'serveLength', 'long'),
+  style('personServe', '人狙い', 'serveTarget', 'person'),
+  style('seamServe', 'つなぎ目狙い', 'serveTarget', 'seam'),
+  style('straightPref', 'ストレート好み', 'course', 'straight'),
+  style('crossPref', 'クロス好み', 'course', 'cross'),
+  style('hardHitter', '強打志向', 'hitting', 'hard'),
+  style('softHitter', '軟打志向', 'hitting', 'soft'),
+  style('commitBlock', 'コミット寄り', 'blocking', 'commit'),
+  style('readBlock', 'リード寄り', 'blocking', 'read'),
+  style('activeDefense', '積極守備', 'defense', 'active'),
+  style('passiveDefense', '消極守備', 'defense', 'passive'),
+  style('overhandPass', 'オーバー派', 'receiving', 'overhand'),
+  style('underhandPass', 'アンダー派', 'receiving', 'underhand'),
+  style('aceSetter', 'エース頼み', 'setting', 'ace', ['S']),
+  style('spreadSetter', '散らし好き', 'setting', 'spread', ['S']),
 
-  // ---- 金 ----
+  // ================= 金 =================
   gold('perfectCut', '完璧カット', 'receiveMaster', each('serveReceive', ['technique'], 15)),
 ];
 
@@ -214,7 +299,12 @@ export function traitDefs(p: Player): TraitDef[] {
 }
 
 export function canDo(p: Player, action: UnlockAction): boolean {
-  return traitDefs(p).some(d => d.kind === 'unlock' && d.unlocks === action);
+  return p.traits.map(id => TRAITS[id]).some(d => !!d && ((d.kind === 'unlock' && d.unlocks === action) || (d.kind === 'stat' && d.alsoUnlocks === action)));
+}
+
+/** その特能（または、それを置き換えた金特）を持っているか */
+export function hasTrait(p: Player, id: string): boolean {
+  return traitDefs(p).some(d => d.id === id || (d.kind === 'stat' && d.upgradeOf === id));
 }
 
 export function styleOf<A extends StyleAxis>(p: Player, axis: A): StyleAxes[A] | undefined {
@@ -229,7 +319,8 @@ export function validateTrait(def: TraitDef): string[] {
     if (!def.effects.length) errs.push(`${def.id}: 効果がない`);
     for (const e of def.effects) {
       if (!TRAIT_STAGES.includes(Math.abs(e.delta) as Stage)) errs.push(`${def.id}: 段階 ${e.delta} は使えない`);
-      if (def.color === 'red' && e.delta > 0) errs.push(`${def.id}: 赤なのにプラス`);
+      // 赤はマイナスが主。ムラっ気のように好調の時だけ上がるもの（マイナスも持つ）と、相手に効くもの（配球バレ）は例外
+      if (def.color === 'red' && e.delta > 0 && e.target !== 'opponent' && !def.effects.some(x => x.delta < 0)) errs.push(`${def.id}: 赤なのにプラスだけ`);
       if ((def.color === 'blue' || def.color === 'gold') && e.delta < 0) errs.push(`${def.id}: 青・金なのにマイナス`);
     }
   }

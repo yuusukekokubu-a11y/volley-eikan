@@ -115,7 +115,7 @@ export const SERVE = {
   } as Record<ServeType, { base: number; tech: number; power: number; jump: number }>,
   /** 揺れ（レシーブのばらつきが増える） */
   shake: { float: 0.35, jumpFloat: 0.55, spike: 0 } as Record<ServeType, number>,
-  targetU: [1.5, 8.6],
+  targetU: [1.5, 8.6] as [number, number],
   targetV: [-4.2, 4.2],
   /** フローターを打つ位置（ネットからの距離） */
   serverU: 9.8,
@@ -260,7 +260,9 @@ export const ATTACK = {
   aimErrTech: 0.006,
   hardTargetU: [2.0, 8.6] as [number, number],
   tipTargetU: [0.5, 3.2] as [number, number],
-  targetV: [-4.2, 4.2],
+  /** コースを決めて打つ時、ストレート・クロスそれぞれの内側の端（|v|）。ここから外側を狙う */
+  courseInnerV: -0.5,
+  targetV: [-4.2, 4.2] as [number, number],
 };
 
 // ---------------- ブロック ----------------
@@ -473,6 +475,35 @@ export const STYLE = {
     aggressive: { fault: 1.5, pressure: 5 },
     safe: { fault: 0.55, pressure: -5 },
   },
+  /** ショート多め／ロング多め：サーブの狙う深さ（u の範囲） */
+  serveLength: { short: [1.5, 5.0], long: [5.5, 8.6] } as Record<'short' | 'long', [number, number]>,
+  /** 人狙い：一番レシーブの弱い選手の正面を狙う。つなぎ目狙い：選手と選手の間を強く狙う（候補を増やす） */
+  seamExtraCandidates: 2,
+  /** スパイクのコース：ストレートに打つ割合（好みなし・ストレート好み・クロス好み）。サイドから打つ時だけ */
+  straightShare: { none: 0.4, straight: 0.7, cross: 0.15 },
+  /** サイドから打つとみなすレーンの |v| */
+  sideLaneV: 1.5,
+  /** コース読み：相手アタッカーのコースの好みが当たると、ブロックの壁がこの倍率で厚くなる */
+  courseReadWall: 1.3,
+  /** 強打志向／軟打志向：軟打に切り替える割合の倍率 */
+  softRate: { hard: 0.55, soft: 1.6 },
+  /** コミット寄り／リード寄り：時間差のフェイクに掛かる割合の倍率と、速攻への反応の早さ（秒、マイナスほど早い） */
+  blocking: {
+    commit: { bite: 1.6, quickReact: -0.08 },
+    read: { bite: 0.5, quickReact: 0.05 },
+  },
+  /** 積極守備／消極守備：届く距離（m）の増減と、レシーブの技量の増減 */
+  defense: {
+    active: { reach: 0.4, skill: -4 },
+    passive: { reach: -0.3, skill: 4 },
+  },
+  /** オーバー派／アンダー派：サーブレシーブの技量の増減（揺れるサーブ・強いサーブ） */
+  receiving: {
+    overhand: { float: 6, hard: -6 },
+    underhand: { float: -3, hard: 3 },
+  },
+  /** エース頼み／散らし好き：エースに集める割合の倍率（散らし好きは均等に寄せる） */
+  setting: { aceMul: 1.3, aceMax: 0.9, spreadMix: 0.5 },
 };
 
 /** 特能の 5段階で表せない効き（相談して決めたもの） */

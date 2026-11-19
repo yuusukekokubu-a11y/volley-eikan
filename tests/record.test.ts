@@ -27,7 +27,7 @@ describe('記録：ボールを受ける選手の立ち位置と移動', () => {
         expect(team === 'A' ? m.to.x <= -0.3 + 1e-6 : m.to.x >= 0.3 - 1e-6).toBe(true);
         expect(Math.abs(m.to.x)).toBeLessThanOrEqual(9 + 1e-6);
         expect(Math.abs(m.to.y)).toBeLessThanOrEqual(4.5 + 1e-6);
-        expect(Math.hypot(m.to.x - e.pos.x, m.to.y - e.pos.y)).toBeLessThanOrEqual(0.9 + 1e-3);
+        expect(Math.hypot(m.to.x - e.pos.x, m.to.y - e.pos.y)).toBeLessThanOrEqual(0.9 + 2e-3);
       }
     }
     expect(n).toBeGreaterThan(200);

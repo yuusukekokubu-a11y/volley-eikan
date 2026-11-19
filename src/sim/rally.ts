@@ -15,7 +15,7 @@ import {
   MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA,
 } from './constants';
 import { Rng } from './rng';
-import { canDo, styleOf, traitDelta, traitExtra, type Scene } from './traits';
+import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
 import type {
   ActionInfo, ActionType, BallKind, BallSegment, Player, PlayerPlacement, PointReason, RallyEvent,
   RallyInput, RallyRecord, Role, ServeType, SetType, TeamId, Vec2, Vec3,
@@ -90,6 +90,10 @@ interface SetBall {
   contactCm: number;
   /** 空中のどの段階で触ったか（0〜1、頂点は0.5） */
   airPhase: number;
+  /** トスを上げた選手（配球バレ：相手ブロッカーの読みに効く） */
+  tosser?: CourtPlayer;
+  /** 打つコース（サイドから打つ時だけ） */
+  course?: 'straight' | 'cross';
 }
 
 /** 助走の計画（乱数を使わない見積もり） */
@@ -113,6 +117,8 @@ interface Blocker {
   spot: Local;
   timing: number;
   reachCm: number;
+  /** コース読み：相手アタッカーの好みのコース（読んで寄っている） */
+  readCourse?: 'straight' | 'cross';
 }
 
 type Step =
@@ -702,12 +708,20 @@ class RallySim {
     const judge = this.skill(server, [...sc, 'serveAim']);
     const exec = this.skill(server, sc);
     const recv = this.receivers(rt);
-    const k = 1 + Math.floor(Math.max(0, judge) / SERVE.aimTechDiv);
+    // 緑：ショート多め／ロング多め（狙う深さ）、人狙い／つなぎ目狙い（狙い方）
+    const len = styleOf(server.p, 'serveLength');
+    const uR: [number, number] = len ? STYLE.serveLength[len] : SERVE.targetU;
+    const tgt = styleOf(server.p, 'serveTarget');
+    const k = 1 + Math.floor(Math.max(0, judge) / SERVE.aimTechDiv) + (tgt === 'seam' ? STYLE.seamExtraCandidates : 0);
+    // 人狙い：一番レシーブの弱そうな選手（場面 serveReceive のテクニック）の正面
+    const weakest = tgt === 'person' ? recv.reduce((a, b) => (this.skill(b, ['serveReceive']) < this.skill(a, ['serveReceive']) ? b : a)) : undefined;
     let best: { l: Local; s: number } | undefined;
     for (let i = 0; i < k; i++) {
-      const l: Local = { u: this.rng.range(SERVE.targetU[0], SERVE.targetU[1]), v: this.rng.range(SERVE.targetV[0], SERVE.targetV[1]) };
-      // レシーバーが動いて取りにくい所ほど良い
-      const s = Math.min(...recv.map(c => dist(this.pos.get(c.p.id)!, l) - this.reachDist(c, flight) * 0.3));
+      const l: Local = { u: this.rng.range(uR[0], uR[1]), v: this.rng.range(SERVE.targetV[0], SERVE.targetV[1]) };
+      // レシーバーが動いて取りにくい所ほど良い。人狙いは狙った選手に近いほど良い
+      const s = weakest
+        ? -dist(this.pos.get(weakest.p.id)!, l)
+        : Math.min(...recv.map(c => dist(this.pos.get(c.p.id)!, l) - this.reachDist(c, flight) * 0.3));
       if (!best || s > best.s) best = { l, s };
     }
     // 狙いのずれ：テクニック。トスと助走で直しきれなかったずれの分だけ大きくなる
@@ -737,7 +751,10 @@ class RallySim {
       // ボールが飛んできた時に、記録の上でいる位置（守備の位置へ動いている途中ならその途中）から追う
       const from = this.posAt(c, inc.tArrive - inc.flight);
       const d = dist(from, inc.land);
-      const reach = this.reachDist(c, Math.max(0, this.timeToReact(c, inc.tArrive, inc.flight) - (inc.readDelay ?? 0)));
+      // 緑：積極守備は届く範囲が広く、消極守備は狭い
+      const ds = styleOf(c.p, 'defense');
+      const reach = this.reachDist(c, Math.max(0, this.timeToReact(c, inc.tArrive, inc.flight) - (inc.readDelay ?? 0)))
+        + (ds ? STYLE.defense[ds].reach : 0);
       // セッターは2本目のために、なるべく1本目を触らない
       const margin = reach - d - (c.role === 'S' && inc.kind !== 'serve' ? 0.8 : 0);
       if (!best || margin > best.margin) best = { c, margin, d, reach };
@@ -770,6 +787,7 @@ class RallySim {
     if (isServe && inc.shake > 0) sc.push('receiveFloat');
     if ((isServe || inc.kind === 'spike') && inc.pressure >= PASS.hardPressure) sc.push('receiveHard');
     if (inc.kind === 'tip') sc.push('digTip');
+    if (inc.kind === 'oneTouch') sc.push('blockFollow');
     if (dive) sc.push('dive');
     let sk = PASS.skill.base + this.skill(c, sc) * PASS.skill.tech * (c.role === 'L' ? aptitudeFactor(c.p, 'L') : 1)
       + this.phys(c, 'speed', sc) * PASS.skill.speed;
@@ -778,6 +796,11 @@ class RallySim {
       sk += (match ? TACTIC_FIT.receiveMatch : TACTIC_FIT.receiveMismatch) * this.w.tactic;
     }
     if (dive) sk -= 8;
+    // 緑：積極守備は弾くミスが増え、消極守備は確実に上げる。オーバー派・アンダー派はサーブの種類で得手不得手
+    const ds = styleOf(c.p, 'defense');
+    if (ds) sk += STYLE.defense[ds].skill;
+    const rcv = isServe ? styleOf(c.p, 'receiving') : undefined;
+    if (rcv) sk += (inc.shake > 0 ? STYLE.receiving[rcv].float : 0) + (inc.pressure >= PASS.hardPressure ? STYLE.receiving[rcv].hard : 0);
     const baseKey = inc.kind === 'blockBack' ? 'oneTouch' : inc.kind;
     const p = sigmoid((sk - inc.pressure) / PASS.scale + PASS.base[baseKey] + this.rng.normal() * (PASS.noise + inc.shake));
     const z = dive ? PASS.contactZ.dive : isServe ? PASS.contactZ.receive : PASS.contactZ.dig;
@@ -896,7 +919,11 @@ class RallySim {
     }
     if (wings.length) {
       const ace = wings.reduce((a, b) => (this.attackRating(b) > this.attackRating(a) ? b : a));
-      const share = wings.length === 1 ? 1 : SET.aceShare[ts.tactics.attack];
+      let share = wings.length === 1 ? 1 : SET.aceShare[ts.tactics.attack];
+      // 緑：エース頼み／散らし好き
+      const st = styleOf(tosser.p, 'setting');
+      if (wings.length > 1 && st === 'ace') share = Math.min(STYLE.setting.aceMax, share * STYLE.setting.aceMul);
+      if (wings.length > 1 && st === 'spread') share += (1 / wings.length - share) * STYLE.setting.spreadMix;
       for (const c of wings) {
         const part = c === ace ? share : (1 - share) / (wings.length - 1);
         const lane = this.laneOf(c, fs.get(c)!);
@@ -987,7 +1014,7 @@ class RallySim {
 
     const sb: SetBall = {
       team, attacker, setType, hit, tSet: bu.t, tHit, setError, secondary: !useSetter,
-      tTake, jumpM, miss, contactCm: contact.cm, airPhase: contact.phase,
+      tTake, jumpM, miss, contactCm: contact.cm, airPhase: contact.phase, tosser,
     };
 
     // 打てないトス、または踏み切りのタイミングが大きく外れて空中で合わせられない時：跳ばずにつなぎで返す
@@ -1097,6 +1124,13 @@ class RallySim {
     if (n >= 2) sc.push('attackRepeat');
     if (sb.direct) sc.push('direct');
 
+    // コース（サイドから打つ時だけ）。緑のストレート好み／クロス好みで偏る
+    if (!sb.direct && Math.abs(sb.hit.v) >= STYLE.sideLaneV) {
+      const pref = styleOf(a.p, 'course');
+      sb.course = this.rng.chance(STYLE.straightShare[pref ?? 'none']) ? 'straight' : 'cross';
+      sc.push(sb.course === 'straight' ? 'attackStraight' : 'attackCross');
+    }
+
     let penalty = sb.miss * ATTACK.missPenalty;
     const slow = quick ? Math.max(0, ATTACK.quickSpeedPivot - this.ab(a, 'speed', sc)) : 0;
     penalty += slow * ATTACK.quickSpeedPenalty;
@@ -1117,8 +1151,9 @@ class RallySim {
     }
     // 軟打に切り替える判断：壁が厚いのを読めるほど（テクニック）軟打でかわす
     const judge = this.skill(a, sc) / 100;
-    const softRate = ATTACK.softBase + (sb.miss > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
-      + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge;
+    const hs = styleOf(a.p, 'hitting');
+    const softRate = (ATTACK.softBase + (sb.miss > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
+      + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge) * (hs ? STYLE.softRate[hs] : 1);
     const soft = !canHard || (!sb.direct && this.rng.chance(softRate));
     if (soft) sc.push('tip');
     const tech = this.skill(a, sc);
@@ -1176,9 +1211,16 @@ class RallySim {
     // ブロックに触るか
     if (blockers.length && !overBlock) {
       // 打ち分け：テクニックが高いほどブロックの手に当てずに打てる
-      const touch = (1 - Math.exp(-wall * BLOCK.touchK)) * clamp(BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv, 0.2, 1);
+      // 触る判定（場面 blockTouch）と止める判定（場面 blockKill）。コース読みが当たれば壁が厚くなる
+      let wallTouch = 0;
+      for (const b of blockers) {
+        const read = b.readCourse && b.readCourse === sb.course ? STYLE.courseReadWall : 1;
+        wallTouch += b.timing * (this.blockSkill(b.cp, [...b.sc, 'blockTouch']) / 100) * read
+          * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
+      }
+      const touch = (1 - Math.exp(-wallTouch * BLOCK.touchK)) * clamp(BLOCK.touchTechPivot - tech / BLOCK.touchTechDiv, 0.2, 1);
       const blockPower = BLOCK.power.base + Math.max(...blockers.map(b =>
-        this.blockSkill(b.cp, b.sc) * BLOCK.power.block + (b.reachCm - hitCm) * BLOCK.power.height * this.w.physical))
+        this.blockSkill(b.cp, [...b.sc, 'blockKill']) * BLOCK.power.block + (b.reachCm - hitCm) * BLOCK.power.height * this.w.physical))
         + (blockers.length - 1) * BLOCK.power.extra;
 
       if (this.rng.chance(touch)) {
@@ -1187,7 +1229,10 @@ class RallySim {
         this.ballTo(contact, tBlock, 'spike');
         const pKill = sigmoid((blockPower - power - tech * BLOCK.killTech) / BLOCK.killScale + BLOCK.killBase);
         if (this.rng.chance(pKill)) return this.blockKill(sb, main, tBlock);
-        if (this.rng.chance(BLOCK.blockOutBase * (tech / 50))) {
+        // ブロックアウト：打つ側のテクニック（場面 blockOut）。ブロックアウトされやすい選手が当てられると増える
+        const outTech = this.skill(a, [...sc, 'blockOut']);
+        const guard = this.blockSkill(main.cp, [...main.sc, 'blockOutGuard']) - this.blockSkill(main.cp, main.sc);
+        if (this.rng.chance(BLOCK.blockOutBase * (outTech / 50) * clamp(1 - guard / 40, 0.3, 2))) {
           const out: Local = this.rng.chance(0.5)
             ? { u: this.rng.range(9.5, 12), v: this.rng.range(-5, 5) }
             : { u: this.rng.range(2, 8), v: (this.rng.chance(0.5) ? 1 : -1) * this.rng.range(5, 7) };
@@ -1222,7 +1267,15 @@ class RallySim {
     const speed = TIMING.spikeSpeedBase + this.phys(a, 'power', sc) * TIMING.spikeSpeedPerPower;
     const range: [number, number] = [Math.max(ATTACK.hardTargetU[0], minLand), ATTACK.hardTargetU[1]];
     const roughFlight = (sb.hit.u + (range[0] + range[1]) / 2) / speed;
-    const land = this.aim(opp, range, roughFlight, tech, blockers, sb.tHit);
+    // コース：ストレートは打った側のサイドライン沿い、クロスは反対側（守る側の座標では v の向きが逆になる）
+    let vRange: [number, number] = ATTACK.targetV;
+    if (sb.course) {
+      const sameSide = -Math.sign(sb.hit.v);
+      const side = sb.course === 'straight' ? sameSide : -sameSide;
+      const lo = side * ATTACK.courseInnerV, hi = side * ATTACK.targetV[1];
+      vRange = [Math.min(lo, hi), Math.max(lo, hi)];
+    }
+    const land = this.aim(opp, range, roughFlight, tech, blockers, sb.tHit, vRange);
     const dx = sb.hit.u + land.u;
     const dy = (-land.v) - sb.hit.v;
     const flight = Math.hypot(dx, dy, hitZ) / speed;
@@ -1262,10 +1315,14 @@ class RallySim {
       }
       const spot: Local = { u: 0.3, v: clamp(spotV, -4.4, 4.4) };
       // 読み（ブロック能力）：トスを見て動き出すまでの時間と、時間差のフェイクに跳ばされるか
-      const read = this.blockSkill(c, [...sc, 'blockRead']);
-      // 打つミドルが速いほど、速攻のフェイクが本物らしく見えて跳ばされやすい
-      const fake = sb.setType === 'timeDiff' ? (this.eff(sb.attacker, 'speed') - 50) * APPROACH.fakeSpeedSlope : 0;
-      const bite = clamp(BLOCK.timeDiffBite + (50 - read) * BLOCK.biteReadSlope + fake, 0.05, 0.9);
+      // 配球バレ：トスを上げた選手の特能が、相手ブロッカーの読みに効く
+      const read = this.ab(c, 'block', ['block', ...sc, 'blockRead'], sb.tosser?.p);
+      // 打つミドルが速いほど、速攻のフェイクが本物らしく見えて跳ばされやすい（場面 attackTimeDiff）
+      const fake = sb.setType === 'timeDiff' ? (this.ab(sb.attacker, 'speed', ['attack', 'attackQuick', 'attackTimeDiff']) - 50) * APPROACH.fakeSpeedSlope : 0;
+      // 緑：コミット寄りは時間差に掛かりやすく速攻に早い。リード寄りはその逆
+      const bs = styleOf(c.p, 'blocking');
+      const bsk = bs ? STYLE.blocking[bs] : { bite: 1, quickReact: 0 };
+      const bite = clamp((BLOCK.timeDiffBite + (50 - read) * BLOCK.biteReadSlope + fake) * bsk.bite, 0.05, 0.9);
       if (sb.setType === 'timeDiff' && c.role === 'MB' && this.rng.chance(bite)) {
         this.moveTo(c, { u: 0.3, v: clamp(-LANE_V.quick, -4, 4) }, sb.tSet, { dur: 0.2 });
         this.jump(c, tQuick - TIMING.blockRise, TIMING.blockTotal, (this.blockCm(c) - standingReachCm(c.p.height)) / 100);
@@ -1273,7 +1330,7 @@ class RallySim {
         return;
       }
       const sp = this.eff(c, 'speed');
-      const react = readReaction(read);
+      const react = Math.max(0.05, readReaction(read) + (quick ? bsk.quickReact : 0));
       // 読み→横移動→踏み切り（跳び上がるまでの時間）が、トスが上がってから打つまでに収まるか
       const tNeed = react + Math.abs(spot.v - p.v) / sideSpeed(sp) + TIMING.blockRise;
       const late = tNeed - tAvail;
@@ -1282,7 +1339,9 @@ class RallySim {
       this.moveTo(c, spot, sb.tSet + react, {
         arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15), asap: true, dur: Math.abs(spot.v - p.v) / sideSpeed(sp),
       });
-      res.push({ cp: c, sc, spot, timing, reachCm: this.blockCm(c) - (1 - timing) * 20 });
+      // コース読み：相手アタッカーにコースの好みがあれば、そちらに寄って跳ぶ
+      const pref = hasTrait(c.p, 'courseRead') ? styleOf(sb.attacker.p, 'course') : undefined;
+      res.push({ cp: c, sc, spot, timing, reachCm: this.blockCm(c) - (1 - timing) * 20, readCourse: pref });
     });
     // ブロックに跳ばない前衛は下がってフェイントや強打に備える
     for (const c of front) {
@@ -1349,13 +1408,14 @@ class RallySim {
   }
 
   /** 狙う場所：テクニックが高いほど候補を多く比べて、守備のいない所を選ぶ */
-  private aim(def: TeamId, uRange: [number, number], flight: number, tech: number, blockers: Blocker[], tHit: number): Local {
+  private aim(def: TeamId, uRange: [number, number], flight: number, tech: number, blockers: Blocker[], tHit: number,
+    vRange: [number, number] = ATTACK.targetV): Local {
     const k = 1 + Math.floor(Math.max(0, tech) / ATTACK.aimTechDiv);
     const jumped = new Set(blockers.map(b => b.cp.p.id));
     const diggers = this.court[def].filter(c => !jumped.has(c.p.id));
     let best: { l: Local; s: number } | undefined;
     for (let i = 0; i < k; i++) {
-      const l: Local = { u: this.rng.range(uRange[0], uRange[1]), v: this.rng.range(ATTACK.targetV[0], ATTACK.targetV[1]) };
+      const l: Local = { u: this.rng.range(uRange[0], uRange[1]), v: this.rng.range(vRange[0], vRange[1]) };
       const s = Math.min(...diggers.map(c => dist(this.posAt(c, tHit), l) - this.reachDist(c, flight)));
       if (!best || s > best.s) best = { l, s };
     }
