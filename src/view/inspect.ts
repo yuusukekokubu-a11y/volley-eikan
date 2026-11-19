@@ -48,6 +48,8 @@ let speedIdx = 1;
 let viewIdx = 0;
 let dimIdx = 0;
 let focus: string | null = null;
+/** 直前に見つけた動作（同じボタンをもう一度押したら、これより後から探す） */
+let lastFound: { seed: number; t: number } | null = null;
 
 function teams(s: number): Record<TeamId, TeamState> {
   let A = makeTeam(1, 'A', gender, 55), B = makeTeam(2, 'B', gender, 55);
@@ -101,12 +103,14 @@ function applyFollow() {
 /** 見たい動作のある場面を、今の場面の後ろから探す */
 function findNext(key: string) {
   const w = WANTED.find(x => x.key === key)!;
-  const after = (s: number) => (s === seed ? t + 0.05 : -1);
+  const from = lastFound && lastFound.seed === seed ? Math.max(t, lastFound.t) : t;
+  const after = (s: number) => (s === seed ? from + 0.01 : -1);
   for (let s = seed; s < seed + 400; s++) {
     const r = s === seed ? rec : rally(s);
     const e = r.events.find((x): x is ActionEv => x.type === 'action' && x.t > after(s) && w.match(x));
     if (!e) continue;
     if (s !== seed) load(s);
+    lastFound = { seed: s, t: e.t };
     focus = e.playerId;
     buildPlayers();
     applyFollow();
