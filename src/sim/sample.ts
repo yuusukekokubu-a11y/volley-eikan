@@ -1,7 +1,20 @@
 // 試作・テスト用のチームを作る。ゲーム本編の選手生成（新入生の仕組み）とは別物。
 
 import { Rng } from './rng';
-import type { Gender, LineupSlot, Player, Role, Tactics, TeamState } from './types';
+import { emptyAptExp, emptyExp, emptyStats, rollHand, rollHeightPotential, rollLooks } from './player';
+import type { AptStage, Gender, LineupSlot, Player, Role, Tactics, TeamState } from './types';
+
+/** 試作用の年度（学年は 1〜3 をばらけさせる） */
+export const SAMPLE_YEAR = 1;
+
+/** 本職ごとの、ほかの位置の適性の目安（3＝◎、2＝○、1＝△、0＝－） */
+const APT_BASE: Record<Role, Record<Role, AptStage>> = {
+  S: { S: 3, OH: 1, MB: 0, OP: 1, L: 1 },
+  OH: { S: 0, OH: 3, MB: 1, OP: 2, L: 1 },
+  MB: { S: 0, OH: 1, MB: 3, OP: 1, L: 0 },
+  OP: { S: 0, OH: 2, MB: 1, OP: 3, L: 0 },
+  L: { S: 1, OH: 1, MB: 0, OP: 0, L: 3 },
+};
 
 type Strength = number; // 能力の平均の目安（0〜100）
 
@@ -12,14 +25,22 @@ const ROLE_HEIGHT: Record<Gender, Record<Role, number>> = {
 
 export function makePlayer(rng: Rng, id: string, number: number, role: Role, gender: Gender, avg: Strength): Player {
   const n = (spread = 10) => Math.round(Math.min(99, Math.max(1, avg + rng.normal() * spread)));
-  const apt: Record<Role, number> = { S: 20, OH: 30, MB: 30, OP: 30, L: 20 };
-  apt[role] = 70 + Math.round(rng.range(0, 30));
+  // 本職は◎、ほかの位置は目安から1段階ずれることがある
+  const apt = { ...APT_BASE[role] };
+  for (const r of Object.keys(apt) as Role[]) {
+    if (r !== role && rng.chance(0.25)) apt[r] = Math.max(0, Math.min(2, apt[r] + (rng.chance(0.5) ? 1 : -1))) as AptStage;
+  }
   // サーブは解禁特能で決まる（試作用に適当に持たせる）
   const serve = rng.weighted([
     { item: [] as string[], w: 3 }, { item: ['jumpFloat'], w: 3 }, { item: ['spikeServe'], w: role === 'OH' || role === 'OP' ? 3 : 1 },
   ])!;
+  const grade = 1 + Math.min(2, Math.floor(rng.range(0, 3)));
   return {
     id, name: `${id}`, number,
+    enrollYear: SAMPLE_YEAR - grade + 1,
+    heightPotential: grade === 3 ? 0 : rollHeightPotential(rng, gender),
+    hand: rollHand(rng),
+    looks: rollLooks(rng),
     height: Math.round(ROLE_HEIGHT[gender][role] + rng.normal() * 4),
     jump: n() + (role === 'MB' || role === 'OH' || role === 'OP' ? 5 : 0),
     power: n() + (role === 'OH' || role === 'OP' ? 5 : 0),
@@ -30,6 +51,16 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     aptitude: apt,
     traits: [...serve],
     condition: 0,
+    // 試作用：学年が上ほど試合に出てきた分だけ信頼度が高い
+    trust: Math.round(Math.min(100, (grade - 1) * 35 + rng.range(0, 30))),
+    injuryDays: 0,
+    exp: emptyExp(),
+    aptExp: emptyAptExp(),
+    traitProgress: {},
+    stats: emptyStats(),
+    career: null,
+    personality: null,
+    middleSchool: null,
   };
 }
 

@@ -1,6 +1,6 @@
 // 能力値から試合で使う値を出す。
 
-import { BODY } from './constants';
+import { APTITUDE, BODY } from './constants';
 import type { Abilities, Player, Role } from './types';
 
 export type AbilityKey = Exclude<keyof Abilities, 'height' | 'stamina'>;
@@ -34,9 +34,9 @@ export function blockReachCm(heightCm: number, jump: number): number {
   return standingReachCm(heightCm) + jumpHeightCm(jump) * BODY.blockJumpRatio;
 }
 
-/** ポジション適性による効きの割合 */
+/** ポジション適性による効きの割合（4段階） */
 export function aptitudeFactor(p: Player, role: Role): number {
-  return BODY.aptitudeMin + ((1 - BODY.aptitudeMin) * clamp(p.aptitude[role], 0, 100)) / 100;
+  return APTITUDE.factor[p.aptitude[role]] ?? APTITUDE.factor[0];
 }
 
 export function runSpeed(speed: number): number {

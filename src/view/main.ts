@@ -8,8 +8,10 @@ import { Match, type BestOf } from '../sim/game';
 import { OWN, SetGame, type StopInfo } from '../sim/match';
 import { makeBench, makeTeam } from '../sim/sample';
 import { TRAITS } from '../sim/traits';
-import type { AttackTactic, BlockTactic, Gender, Player, RallyRecord, ReceiveTactic, Role, Tactics, TeamId } from '../sim/types';
-import { PLAYBACK_RATE } from './common';
+import type { AttackTactic, BlockTactic, Gender, Player, RallyRecord, ReceiveTactic, Role, Tactics, TeamId, TrainKey } from '../sim/types';
+import { abilityRank, APT_MARK, PLAYBACK_RATE } from './common';
+import { gradeOf } from '../sim/player';
+import { SAMPLE_YEAR } from '../sim/sample';
 import { Playback, pointText } from './playback';
 import { Render3D } from './render3d';
 
@@ -157,9 +159,21 @@ function tiredHtml(p: Player, fatigue: Record<string, number>): string {
   return f >= FATIGUE.tiredNote ? '<span class="tired">足が止まってきた</span>' : '';
 }
 
+const ABIL: [TrainKey, string][] = [['jump', '跳躍'], ['power', 'パワー'], ['speed', 'スピード'], ['technique', 'テク'], ['block', 'ブロック'], ['stamina', 'スタミナ']];
+const APT_ROLES: [Role, string][] = [['S', 'S'], ['OH', 'OH'], ['MB', 'MB'], ['OP', 'OP'], ['L', 'L']];
+
+/** 選手の一覧の1人分（2行）：背番号・ポジション・学年・身長・6能力（段階＋数値）・調子／適性の記号・特能・疲れ */
 function playerLine(p: Player, role: Role, fatigue: Record<string, number>, bench = false): string {
   const traits = p.traits.map(id => TRAITS[id]?.name).filter(Boolean).join('・') || '－';
-  return `<tr class="${bench ? 'bench' : ''}"><td>${p.number}</td><td>${ROLE_NAME[role]}</td><td>${COND[p.condition + 2]}</td><td>${traits}</td><td>${tiredHtml(p, fatigue)}</td></tr>`;
+  const ab = ABIL.map(([k]) => `<td class="ab"><b>${abilityRank(p[k])}</b> ${p[k]}</td>`).join('');
+  const apt = APT_ROLES.map(([r, n]) => `${n}:${APT_MARK[p.aptitude[r]]}`).join('　');
+  const cls = bench ? 'bench' : '';
+  return `<tr class="${cls} r1"><td>${p.number}</td><td>${ROLE_NAME[role]}</td><td>${gradeOf(p, SAMPLE_YEAR)}年</td><td>${p.height}</td>${ab}<td>${COND[p.condition + 2]}</td></tr>
+    <tr class="${cls} r2"><td></td><td colspan="10">適性 ${apt}　特能 ${traits} ${tiredHtml(p, fatigue)}</td></tr>`;
+}
+
+function rosterHtml(rows: string): string {
+  return `<table class="roster"><tr><th>背番号</th><th>ポジション</th><th>学年</th><th>身長</th>${ABIL.map(([, n]) => `<th>${n}</th>`).join('')}<th>調子</th></tr>${rows}</table>`;
 }
 
 function btn(label: string, on: () => void, disabled = false, cls = ''): HTMLButtonElement {
@@ -249,7 +263,11 @@ function renderLineup() {
   $('stopRight').innerHTML = `
     <div class="hint">2か所を続けて押すと入れ替え（控え→位置・リベロで先発と交代）</div>
     <div class="brow"><span class="label">控え</span><span class="picklist">${benchRows || '－'}</span></div>
-    ${tacticsHtml(team.tactics)}`;
+    ${tacticsHtml(team.tactics)}
+    ${rosterHtml(team.rotation.map(sl => playerLine(sl.player, sl.role, match.fatigue)).join('')
+      + (team.libero ? playerLine(team.libero, 'L', match.fatigue) : '')
+      + match.bench[OWN].map(p => playerLine(p, bestRole(p), match.fatigue, true)).join(''))}
+    <div class="hint">薄い行は控え</div>`;
 
   // 試合の形（試合前だけ）。並びを保ったまま作り直す
   for (const b of Array.from($('stopLeft').querySelectorAll<HTMLButtonElement>('button[data-best]'))) {
@@ -352,8 +370,7 @@ function renderStopMain() {
   const rows = team.rotation.map(sl => playerLine(sl.player, sl.role, g.fatigue)).join('')
     + (team.libero ? playerLine(team.libero, 'L', g.fatigue) : '')
     + g.bench[OWN].map(p => playerLine(p, bestRole(p), g.fatigue, true)).join('');
-  $('stopRight').innerHTML = `<table class="roster"><tr><th>背番号</th><th>ポジション</th><th>調子</th><th>主な特能</th><th></th></tr>${rows}</table>
-    <div class="hint">薄い行は控え</div>`;
+  $('stopRight').innerHTML = `${rosterHtml(rows)}<div class="hint">薄い行は控え</div>`;
   const box = $('stopButtons');
   box.innerHTML = '';
   box.append(

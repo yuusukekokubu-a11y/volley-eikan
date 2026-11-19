@@ -32,8 +32,6 @@ export const BODY = {
   conditionStep: 0.04,
   /** 疲れ1.0の時の能力低下（割合） */
   fatigueMaxDrop: 0.15,
-  /** ポジション適性0の時の効き（適性100で1.0） */
-  aptitudeMin: 0.6,
   /** 走る速さ（m/s）：スピード0→min、100→max */
   runSpeedMin: 3.0,
   runSpeedMax: 6.0,
@@ -429,3 +427,41 @@ export const FATIGUE = {
   /** 停止画面で「足が止まってきた」と出す疲れ */
   tiredNote: 0.45,
 };
+
+/** ポジション適性（4段階：0＝－ほぼできない、1＝△不慣れ、2＝○こなせる、3＝◎本職） */
+export const APTITUDE = {
+  /** 段階ごとの効きの割合（－・△・○・◎） */
+  factor: [0.6, 0.75, 0.9, 1.0],
+  /** その位置で1セット出るとたまる経験 */
+  expPerSet: 1,
+  /** 次の段階に上がるのに要る経験（－→△、△→○、○→◎）。ゆっくり上がる */
+  expToNext: [20, 40, 80],
+};
+
+/** 能力（身長以外）の範囲。練習で伸びるのは上限まで（全員100まで伸びる） */
+export const ABILITY = { min: 1, max: 100 };
+
+/** 信頼度（見えない値 0〜100）。試合に出るほど上がり、試合中だけ全能力が上がる */
+export const TRUST = {
+  max: 100,
+  /** 1セット出るごとに上がる量 */
+  perSet: 1,
+  /** この値以上で全能力にこの段階を足す（特能と同じ5段階の値）。高い方から見る */
+  bonus: [{ at: 80, delta: 3 }, { at: 40, delta: 1 }] as { at: number; delta: 1 | 3 | 5 | 10 | 15 }[],
+};
+
+/** 身長の伸びしろ（cm）。男子：ほとんど0〜3、たまに5〜8、まれに10〜15。女子は scale を掛けて小さめ */
+export const HEIGHT_GROWTH = {
+  bands: [
+    { w: 85, min: 0, max: 3 },
+    { w: 12, min: 5, max: 8 },
+    { w: 3, min: 10, max: 15 },
+  ],
+  scale: { male: 1, female: 0.6 } as Record<Gender, number>,
+};
+
+/** 見た目の候補の数（描画側が色や形に直す） */
+export const LOOKS = { hairStyles: 4, hairColors: 3, skins: 3 };
+
+/** 左利きの割合 */
+export const LEFT_HANDED_RATE = 0.1;

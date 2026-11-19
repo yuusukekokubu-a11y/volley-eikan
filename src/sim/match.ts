@@ -6,7 +6,7 @@ import { FATIGUE, MATCH } from './constants';
 import { MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
 import { simulateRally } from './rally';
 import type { StatEffect } from './traits';
-import type { Gender, Player, RallyRecord, Tactics, TeamId, TeamState } from './types';
+import type { Gender, Player, RallyRecord, Role, Tactics, TeamId, TeamState } from './types';
 
 export const OWN: TeamId = 'A';
 
@@ -71,6 +71,10 @@ export class SetGame {
   winner?: TeamId;
   rallies = 0;
   courtChanged = false;
+  /** このセットに出た選手と、その位置（最初に出た位置）。通算成績・適性の経験用 */
+  played: Record<string, Role> = {};
+  /** このセットの得点（スパイク・ブロック・サービスエース）。通算成績用 */
+  scored: Record<string, { kills: number; blockPoints: number; aces: number }> = {};
   readonly managerSkills: string[];
   private seed: number;
   private starters: Record<TeamId, Set<string>>;
@@ -143,6 +147,15 @@ export class SetGame {
     const l = other(w);
     this.score[w]++;
     this.lostStreak[l]++;
+    // 出た選手と得点を集める
+    for (const pl of rec.placements) this.played[pl.playerId] ??= pl.role;
+    const k = rec.keyPlayerId;
+    const stat = rec.reason === 'kill' || rec.reason === 'tipKill' || rec.reason === 'blockOut' ? 'kills'
+      : rec.reason === 'blockKill' ? 'blockPoints' : rec.reason === 'ace' ? 'aces' : null;
+    if (k && stat) {
+      const sc = (this.scored[k] ??= { kills: 0, blockPoints: 0, aces: 0 });
+      sc[stat]++;
+    }
     this.lostStreak[w] = 0;
     // サイドアウト：サーブ権が移り、得点した側がローテーションを回す
     if (w !== this.serving) {

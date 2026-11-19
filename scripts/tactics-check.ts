@@ -38,7 +38,7 @@ function middleTeam(g: Gender): TeamState {
   const t = flat(g, 'A', 50);
   for (const s of t.rotation) {
     if (s.role === 'MB') { s.player.speed = 85; s.player.jump = 75; s.player.power = 70; s.player.height += 4; }
-    if (s.role === 'S') { s.player.technique = 90; s.player.aptitude.S = 100; }
+    if (s.role === 'S') { s.player.technique = 90; s.player.aptitude.S = 3; }
   }
   return t;
 }

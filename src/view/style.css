@@ -107,3 +107,10 @@ table.roster .tired { color: #ff9d7a; font-size: 12px; }
 .trow, .brow { display: flex; align-items: center; flex-wrap: wrap; margin: 1px 0; }
 .trow .label, .brow .label { width: 4.5em; font-size: 13px; opacity: 0.85; }
 .trow button.pick, .brow button.pick { min-height: 42px !important; font-size: 14px !important; }
+
+/* 選手の一覧（2行で1人） */
+table.roster { font-size: 12px; }
+table.roster td, table.roster th { padding: 2px 4px; white-space: nowrap; }
+table.roster tr.r1 td { border-bottom: 0; padding-top: 4px; }
+table.roster tr.r2 td { font-size: 11px; opacity: 0.8; padding-bottom: 4px; }
+table.roster td.ab b { display: inline-block; width: 1.1em; }

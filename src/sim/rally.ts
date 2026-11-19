@@ -5,6 +5,7 @@
 //   v = 自分のコートでネットを向いた時の左が＋（-4.5〜4.5）
 // 記録に書く時に world() で共通の座標（types.ts の説明）に直す。
 
+import { trustDelta } from './player';
 import {
   aptitudeFactor, blockReachCm, effective, hitHeightCm, jumpHeightCm, runSpeed,
   sideSpeed, standingReachCm, type AbilityKey,
@@ -274,7 +275,8 @@ class RallySim {
     // チームにかかっている一時的な上下（タイムアウトの監督特能など）
     let buff = 0;
     for (const e of this.input.teams[c.team].buffs ?? []) if (e.ability === k && set.has(e.scene)) buff += e.delta;
-    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row) + buff);
+    // 信頼度による上乗せ（試合中だけ、全能力）
+    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row) + buff + trustDelta(c.p));
   }
   /** 体の能力（跳躍・パワー・スピード）が判定に効く量。男女の重みを掛ける */
   private phys(c: CourtPlayer, k: 'jump' | 'power' | 'speed', scenes: Scene[] = []): number {

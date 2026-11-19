@@ -5,6 +5,7 @@
 
 import { FATIGUE, MATCH } from './constants';
 import { OWN, SetGame } from './match';
+import type { MatchLine } from './player';
 import { Rng } from './rng';
 import type { Gender, LineupSlot, Player, Tactics, TeamId, TeamState } from './types';
 
@@ -40,6 +41,8 @@ export class Match {
   /** 各セットの最初のサーブ */
   firstServes: TeamId[] = [];
   winner?: TeamId;
+  /** 選手ごとの、この試合で出たセット・位置・得点（試合の後に applyMatch で選手のデータへ反映する） */
+  lines: Record<string, MatchLine> = {};
   private rng: Rng;
   private seed: number;
   private managerSkills: string[];
@@ -146,6 +149,13 @@ export class Match {
     if (!g || !g.over) throw new Error('セットはまだ終わっていません');
     this.results.push({ A: g.score.A, B: g.score.B, winner: g.winner! });
     this.setsWon[g.winner!]++;
+    for (const [id, role] of Object.entries(g.played)) {
+      const l = (this.lines[id] ??= { sets: 0, roles: {}, kills: 0, blockPoints: 0, aces: 0 });
+      l.sets++;
+      l.roles[role] = (l.roles[role] ?? 0) + 1;
+      const sc = g.scored[id];
+      if (sc) { l.kills += sc.kills; l.blockPoints += sc.blockPoints; l.aces += sc.aces; }
+    }
     // 疲れは持ち越し、セットの間に少し回復する
     this.fatigue = {};
     for (const [id, f] of Object.entries(g.fatigue)) this.fatigue[id] = Math.max(0, f - FATIGUE.setBreakRecover);

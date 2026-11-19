@@ -21,16 +21,81 @@ export interface Abilities {
   stamina: number;
 }
 
+/** ポジション適性の段階：0＝－（ほぼできない）、1＝△（不慣れ）、2＝○（こなせる）、3＝◎（本職） */
+export type AptStage = 0 | 1 | 2 | 3;
+
+/** 練習で伸びる能力（身長以外の6つ） */
+export type TrainKey = Exclude<keyof Abilities, 'height'>;
+
+export type Hand = 'right' | 'left';
+
+/** 見た目（それぞれ見た目の候補の番号。描画側が色や形に直す） */
+export interface Looks {
+  hairStyle: number;
+  hairColor: number;
+  skin: number;
+}
+
+/** 通算成績 */
+export interface CareerStats {
+  /** 出場した試合・セット */
+  matches: number;
+  sets: number;
+  /** スパイク得点（フェイント・ブロックアウトを含む）、ブロック得点、サービスエース */
+  kills: number;
+  blockPoints: number;
+  aces: number;
+}
+
+/**
+ * 選手のデータ（育成でセーブするもの）。試合の計算は能力・適性・特能・調子・信頼度だけを読む。
+ * 試合中だけの状態（疲れ・一時的な上下・コート上の位置）はここに持たず、試合の側で持つ。
+ */
 export interface Player extends Abilities {
+  // ---- 最初に決まって変わらないもの ----
+  /** 選手を見分ける番号（卒業まで変わらない） */
   id: string;
   name: string;
+  /** 入学した年度（学年はここから計算する） */
+  enrollYear: number;
+  /** 身長の伸びしろ（cm、見えない）。4月の身体測定で身長に反映する */
+  heightPotential: number;
+  /** 利き腕（効き方は特能の段階で決める。今は持つだけ） */
+  hand: Hand;
+  looks: Looks;
+
+  // ---- 育成で変わるもの ----
   number: number;
-  /** ポジション適性 0〜100 */
-  aptitude: Record<Role, number>;
+  /** ポジション適性（4段階） */
+  aptitude: Record<Role, AptStage>;
   /** 特殊能力の ID（traits.ts の TRAITS に登録されたもの）。サーブの種類も解禁特能で決まる */
   traits: string[];
-  /** 調子 -2（絶不調）〜 +2（絶好調） */
+  /** 調子 -2（絶不調）〜 +2（絶好調）。試合中は変えない */
   condition: number;
+  /** 信頼度（見えない値 0〜100）。試合に出るほど上がり、試合中だけ全能力が少し上がる */
+  trust: number;
+  /** 怪我の残り日数（0なら怪我なし） */
+  injuryDays: number;
+  /** 能力ごとの経験の端数（1たまると能力が1上がる） */
+  exp: Record<TrainKey, number>;
+  /** 位置ごとの適性の経験（たまると適性が1段階上がる） */
+  aptExp: Record<Role, number>;
+  /** 特能のきっかけの進み具合（特能 ID ごと） */
+  traitProgress: Record<string, number>;
+  stats: CareerStats;
+  /** 卒業後の進路（決まるまでは null） */
+  career: string | null;
+
+  // ---- 枠だけ（中身は後の段階で） ----
+  personality: string | null;
+  middleSchool: string | null;
+}
+
+/** 部員全体（育成でセーブするもの） */
+export interface Squad {
+  players: Player[];
+  /** 主将（枠だけ。中身は後の段階で） */
+  captainId: string | null;
 }
 
 export type AttackTactic = 'ace' | 'balance' | 'quick';
