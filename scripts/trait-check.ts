@@ -44,7 +44,9 @@ function pointRate(g: Gender, id: string | null, roles: Role[], seedOffset = 0):
     for (let i = 0; i < s % 6; i++) a = rotate(a);
     for (let i = 0; i < (s >> 3) % 6; i++) b = rotate(b);
     // 点数をばらけさせる（セット終盤の場面も試す）
-    const score = { A: (s * 7) % 25, B: (s * 13) % 25 };
+    // 実際のセットに近い点数の並び（両チームの点が近い）。セット終盤（20点以降）は2割ほど
+    const sa = (s * 7) % 25;
+    const score = { A: sa, B: Math.max(0, Math.min(24, sa + ((s * 13) % 9) - 4)) };
     const r = simulateRally({
       gender: g, teams: { A: a, B: b }, serving: s % 2 ? 'A' : 'B', seed: s + seedOffset,
       // 途中から入った選手：ピンチサーバーの場面を試すため、自チームの全員を途中から入ったことにする
@@ -93,7 +95,9 @@ function stageOf(d: TraitDef): string {
   if (d.kind === 'stat' && d.special) return '独自';
   if (d.kind === 'stat') {
     const m = Math.max(...d.effects.map(e => Math.abs(e.delta)));
-    const pos = d.effects.some(e => e.delta > 0), neg = d.effects.some(e => e.delta < 0);
+    // 相手に効くものは、自チームから見ると向きが逆
+    const own = (e: { delta: number; target?: string }) => (e.target === 'opponent' ? -e.delta : e.delta);
+    const pos = d.effects.some(e => own(e) > 0), neg = d.effects.some(e => own(e) < 0);
     return `${pos && neg ? '±' : neg ? '-' : '+'}${m}`;
   }
   return d.kind === 'style' ? '緑' : '解禁';

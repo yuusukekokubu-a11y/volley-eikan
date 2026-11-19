@@ -386,6 +386,8 @@ export function defaultHolders(d: TraitDef): Role[] {
     return ['S'];
   }
   if (d.kind === 'unlock') return d.unlocks === 'jumpFloat' || d.unlocks === 'spikeServe' ? ['S', 'OH', 'MB', 'OP'] : ['OH', 'OP'];
+  // 相手に効くもの（配球バレ）は、トスを上げるセッター
+  if (d.effects.some(e => e.target === 'opponent')) return ['S'];
   const scenes = new Set<Scene>(d.effects.map(e => e.scene));
   const has = (...xs: Scene[]) => xs.some(x => scenes.has(x));
   if (has('serve', 'serveAim', 'serveChoice', 'serveFloat', 'serveJumpFloat', 'serveSpike', 'serveStreak', 'pinchServe')) return ['S', 'OH', 'MB', 'OP'];
