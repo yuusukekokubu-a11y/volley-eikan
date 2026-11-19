@@ -5,6 +5,8 @@
 import type { Frame, PlayerFrame } from './playback';
 import { blendJoints, targetJoints, type Joints } from './pose';
 
+/** 待機中の足踏みの速さ（ラジアン/秒。2πで左右1回ずつ） */
+const IDLE_STEP_RATE = 7.5;
 /** 関節の動きを目標に寄せる速さ（1秒あたり） */
 const BLEND_RATE = 14;
 /** 体の向きを目標に寄せる速さ（1秒あたり） */
@@ -33,6 +35,8 @@ export interface MotionState {
   /** 走る脚の振りの位相と、走りの強さ（0〜1.2。止まっている・跳んでいる時は0） */
   runPhase: number;
   runAmt: number;
+  /** 待機中の足踏み・体の揺れの位相（選手ごとにずれる） */
+  idlePhase: number;
 }
 
 export class Motion {
@@ -86,7 +90,7 @@ export class Motion {
     }
     const running = pl.speed > 0.5 && pl.jumpPhase === 'none' && pl.pose !== 'dive';
     const runAmt = running ? Math.min(1.2, pl.speed / 4.5) : 0;
-    return { j, yaw: this.yaw, lean, roll, twist, still, sway, air: pl.jumpPhase === 'air', k, runPhase: this.runPhase, runAmt };
+    return { j, yaw: this.yaw, lean, roll, twist, still, sway, air: pl.jumpPhase === 'air', k, runPhase: this.runPhase, runAmt, idlePhase: fr.t * IDLE_STEP_RATE + this.idle * 2.1 };
   }
 }
 

@@ -4,7 +4,7 @@
 
 import type { ActionType, BallSegment, RallyEvent, RallyRecord, Role, TeamId, Vec2, Vec3 } from '../sim/types';
 
-export type Pose = 'ready' | 'serve' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover' | 'dive';
+export type Pose = 'ready' | 'serve' | 'toss' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover' | 'dive';
 
 /** ジャンプの段階：踏み込み（沈む）→ 空中 → 着地（膝で沈む） */
 export type JumpPhase = 'none' | 'prep' | 'air' | 'land';
@@ -83,6 +83,7 @@ type JumpEv = Extract<RallyEvent, { type: 'jump' }>;
 /** ポーズを取る時間（動作の時刻の前後、秒）。前の時間は「着いてから」に切り詰める */
 const POSE_WINDOW: Partial<Record<ActionType, { pose: Pose; before: number; after: number }>> = {
   serve: { pose: 'serve', before: 0.6, after: 0.25 },
+  toss: { pose: 'toss', before: 0.2, after: 0.35 },
   receive: { pose: 'receive', before: 0.5, after: 0.3 },
   dig: { pose: 'dig', before: 0.4, after: 0.35 },
   set: { pose: 'set', before: 0.35, after: 0.2 },
@@ -192,13 +193,15 @@ export class Playback {
       let contact: Contact | undefined;
       let faceTo: Vec2 | undefined;
       for (const a of this.actions.get(id)!) {
-        const w = POSE_WINDOW[a.action];
+        // ジャンプ系のサーブは、スパイクと同じ腕振りで打つ
+        const jumpServe = a.action === 'serve' && !!a.info?.serveType && a.info.serveType !== 'float';
+        const w = jumpServe ? POSE_WINDOW.spike : POSE_WINDOW[a.action];
         if (!w) continue;
         const dive = isDive(a);
         // 移動 → 着いてからポーズ：構え始めは「その動作に向けた移動が終わった時刻」より前にしない
         const arrive = this.arrivalBefore(id, a.t);
         let start = a.t - (dive ? 0.35 : w.before);
-        if (!dive && a.action !== 'spike' && a.action !== 'tip') {
+        if (!dive && !jumpServe && a.action !== 'spike' && a.action !== 'tip' && a.action !== 'toss') {
           start = Math.max(start, Math.min(arrive, a.t - 0.1));
         }
         const end = a.t + (dive ? 0.6 : w.after);

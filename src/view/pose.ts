@@ -52,6 +52,9 @@ export function armAngles(pl: PlayerFrame): [number, number] | undefined {
     }
     case 'tip':
       return [PI * 0.95, PI * 0.6];
+    case 'toss':
+      // サーブトス：奥の手（ボールを持つ手）で上へ放り上げる
+      return [PI * 0.2, PI * (0.5 + 0.45 * smooth(t / 0.5))];
     case 'block':
       return [PI * 0.97, PI * 0.97];
     case 'set':
@@ -145,6 +148,7 @@ export function elbowAngles(pl: PlayerFrame): [number, number] {
   switch (pl.pose) {
     case 'spike': return t < 0.6 ? [1.5, 0.35] : [0.12, 0.45]; // 肘を引いて振りかぶり、伸ばして打つ
     case 'tip': return [0.45, 0.4];
+    case 'toss': return [0.4, 0.15];
     case 'block': return [0.06, 0.06];
     case 'set': return [1.35, 1.35];                           // 額の上で肘を曲げて受ける
     case 'serve': return t < 0.5 ? [0.3, 0.2] : [0.15, 0.3];

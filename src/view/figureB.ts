@@ -30,6 +30,8 @@ const B = {
  *   bob：走る時の一歩ごとの体の上下（人形の大きさに対する割合）、handBack：手を後ろへ引いた時に腕を長く見せる量
  */
 const EXAG = { crouch: 2.2, minHip: 0.3, stride: 1.7, lift: 1.8, bob: 0.07, handBack: 1.35 };
+/** 待っている間（棒立ちに見えないように）：足踏みで靴を上げる高さ、体の左右の揺れ・上下の弾み（人形の大きさに対する割合） */
+const IDLE = { stepLift: 0.035, sway: 0.025, bob: 0.012 };
 
 const HAIR = new THREE.MeshLambertMaterial({ color: '#4a2f22' });
 const EYE = new THREE.MeshBasicMaterial({ color: '#1b1b1b' });
@@ -109,9 +111,10 @@ export class FigureB implements Figure {
     const straight = thigh + shin;
     const bent = hipHeight(j, thigh, shin);
     const sunk = Math.max(straight * EXAG.minHip, straight - (straight - bent) * EXAG.crouch);
-    const bob = EXAG.bob * F * ms.runAmt * Math.abs(Math.sin(ms.runPhase));
+    const idleS = ms.still ? Math.sin(ms.idlePhase) : 0;
+    const bob = EXAG.bob * F * ms.runAmt * Math.abs(Math.sin(ms.runPhase)) + (ms.still ? IDLE.bob * F * Math.abs(idleS) : 0);
     this.hipY = smoothHip(this.hipY, ms.air ? straight : sunk, ms);
-    this.pitch.position.set(0, this.hipY + bob, ms.sway);
+    this.pitch.position.set(0, this.hipY + bob, ms.sway + (ms.still ? IDLE.sway * F * idleS : 0));
     this.pitch.rotation.z = -j.pitch;
 
     // 靴：見えない脚の先。前後の振りと持ち上げを大きくし、沈んだ時も床に着いたまま
@@ -129,6 +132,11 @@ export class FigureB implements Figure {
     const low = Math.min(fN.y, fF.y);
     foot(this.shoeN, fN, j.thighN, j.kneeN, 1, low);
     foot(this.shoeF, fF, j.thighF, j.kneeF, -1, low);
+    // 待っている間は、左右の靴を交互に小さく上げて足踏みする
+    if (ms.still) {
+      this.shoeN.position.y += IDLE.stepLift * F * Math.max(0, idleS);
+      this.shoeF.position.y += IDLE.stepLift * F * Math.max(0, -idleS);
+    }
 
     this.upper.rotation.set(-ms.roll, ms.twist, -ms.lean);
     // 手：見えない腕の先（肘を曲げた分だけ腕が短くなる）
