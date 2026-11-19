@@ -1,6 +1,6 @@
 // 緑（行動の傾向）の確認用。対になる緑ごとに、相手や状況を変えて「持たせない場合との得点率の差」を比べる。
 // 目標は「平均では釣り合っていて、相手や状況によって得・損が入れ替わる」こと。
-//   npx tsx scripts/style-check.ts [1回のラリー数] [male|female|both] [K]
+//   npx tsx scripts/style-check.ts [1回のラリー数] [male|female|both] [K] [緑のIDをカンマ区切り]
 
 import { simulateRally } from '../src/sim/rally';
 import { makeTeam, rotate } from '../src/sim/sample';
@@ -10,6 +10,8 @@ import type { Gender, Player, Role, TeamState } from '../src/sim/types';
 const N = Number(process.argv[2] || 3000);
 const genders: Gender[] = process.argv[3] === 'male' ? ['male'] : process.argv[3] === 'female' ? ['female'] : ['male', 'female'];
 const K = Number(process.argv[4] || 3);
+/** 確かめる対だけに絞る（緑の ID をカンマ区切り。対のどちらかを書けばよい） */
+const only = process.argv[5]?.split(',');
 
 type Mod = (t: TeamState) => TeamState;
 const none: Mod = t => t;
@@ -106,6 +108,7 @@ const f = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}`;
 for (const g of genders) {
   console.log(`\n== ${g === 'male' ? '男子' : '女子'}（${N}ラリー×${K}組。持たせない場合との得点率の差、点）`);
   for (const pair of PAIRS) {
+    if (only && !only.includes(pair.a) && !only.includes(pair.b)) continue;
     const scs: Scenario[] = [{ name: '普通の相手' }, ...pair.scenarios];
     const rows: { name: string; a: number; b: number }[] = [];
     for (const sc of scs) {

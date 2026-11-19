@@ -184,6 +184,7 @@ const LIST: TraitDef[] = [
   unlock('backAttack', 'バックアタック', 'backAttack', ['OH', 'OP']),
   unlock('dump', 'ツーアタック', 'dump', ['S']),
   unlock('rebound', 'リバウンド', 'rebound', ['OH', 'OP', 'MB']),
+  unlock('broad', 'ブロード', 'broad', ['MB']),
 
   // ================= 青：全プレー =================
   blue('clutch', '勝負強い', each('clutch', ALL5, 5)),

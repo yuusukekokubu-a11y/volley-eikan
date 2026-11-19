@@ -50,6 +50,8 @@ export interface PlayerFrame {
   jumpPhase: JumpPhase;
   /** ジャンプの段階の中の進み具合 0〜1 */
   jumpT: number;
+  /** 片足で踏み切るジャンプ（ブロード） */
+  oneFoot?: boolean;
   contact?: Contact;
   /** 動作のために向く点（世界座標）。なければ移動の方向かボールの方を向く */
   faceTo?: Vec2;
@@ -174,15 +176,18 @@ export class Playback {
       let z = 0;
       let jumpPhase: JumpPhase = 'none';
       let jumpT = 0;
+      let oneFoot = false;
       for (const j of this.jumps.get(id)!) {
         if (t >= j.t && t <= j.t + j.dur) {
           const s = (t - j.t) / j.dur;
           z = Math.max(z, j.height * 4 * s * (1 - s));
           jumpPhase = 'air';
           jumpT = s;
+          oneFoot = !!j.oneFoot;
         } else if (jumpPhase === 'none' && t >= j.t - JUMP_PREP && t < j.t) {
           jumpPhase = 'prep';
           jumpT = (t - (j.t - JUMP_PREP)) / JUMP_PREP;
+          oneFoot = !!j.oneFoot;
         } else if (jumpPhase === 'none' && t > j.t + j.dur && t <= j.t + j.dur + JUMP_LAND) {
           jumpPhase = 'land';
           jumpT = (t - j.t - j.dur) / JUMP_LAND;
@@ -225,7 +230,7 @@ export class Playback {
       return {
         id, team: pl.team, number: pl.number, role: pl.role, height: pl.height / 100,
         x: pos.x, y: pos.y, z, pose, poseT, vx, vy, ax, ay, speed: Math.hypot(vx, vy), moveKind, moveT,
-        jumpPhase, jumpT, contact, faceTo,
+        jumpPhase, jumpT, contact, faceTo, ...(oneFoot ? { oneFoot } : {}),
       };
     });
 

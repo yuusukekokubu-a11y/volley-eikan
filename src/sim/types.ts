@@ -180,7 +180,8 @@ export type ActionType =
 
 export type RallyEvent =
   | { type: 'move'; t: number; playerId: string; to: Vec2; dur: number }
-  | { type: 'jump'; t: number; playerId: string; dur: number; height: number }
+  /** oneFoot：片足で踏み切る（ブロード） */
+  | { type: 'jump'; t: number; playerId: string; dur: number; height: number; oneFoot?: boolean }
   | { type: 'action'; t: number; playerId: string; team: TeamId; action: ActionType; pos: Vec3; info?: ActionInfo }
   | { type: 'land'; t: number; pos: Vec3; inCourt: boolean }
   | { type: 'point'; t: number; winner: TeamId; reason: PointReason; playerId?: string };

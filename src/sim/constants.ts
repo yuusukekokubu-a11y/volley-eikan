@@ -485,21 +485,29 @@ export const STYLE = {
   /** スパイクのコース：ストレートに打つ割合（好みなし・ストレート好み・クロス好み）。サイドから打つ時だけ */
   straightShare: { none: 0.4, straight: 0.7, cross: 0.15 },
   /**
-   * コースごとの性質。ストレートはサイドライン際でアウトしやすく、間に合ったブロックには外の手で止められやすいが、
-   * 遅れたブロックの外を抜きやすい（ブロックの遅い相手に得）。クロスはコートが長く入りやすい（ブロックの揃う相手に得）
+   * コースごとの性質。ストレートはサイドライン際でアウトしやすく、ブロックの外の手で止められやすい。
+   * ブロックが強いほど止められ、弱い・遅れたブロックは抜きやすい（ブロックの弱い相手に得）。
+   * クロスはコートが長く入りやすい（ブロックの強い相手に得）。
+   * 触る判定の壁の倍率＝（ブロック能力/blockPivot）^blockPow（間に合っていなければ × lateK）
    */
   course: {
-    straight: { err: 1.35, wallOnTime: 1.3, wallLate: 0.7 },
-    cross: { err: 0.85, wallOnTime: 1, wallLate: 1 },
+    straight: { err: 1.2, blockPivot: 50, blockPow: 1.5, lateK: 0.7 },
+    cross: { err: 0.88, blockPivot: 50, blockPow: 0, lateK: 1 },
   },
+  /** ストレートのアウトしやすさの男女の重み（女子は打球が遅くクロスが拾われやすい分、ストレートが得になりすぎるため） */
+  straightErrK: { male: 1, female: 1.6 } as Record<Gender, number>,
+  /** クロスはコートが長い分、思い切り打てる（打球の強さの倍率）。女子は打球が遅く拾われやすいので重みを大きく */
+  crossPower: { male: 1.0, female: 1.15 } as Record<Gender, number>,
   /** サイドから打つとみなすレーンの |v| */
   sideLaneV: 1.5,
   /** コース読み：相手アタッカーのコースの好みが当たると、ブロックの壁がこの倍率で厚くなる */
   courseReadWall: 1.3,
   /** 強打志向／軟打志向：軟打に切り替える割合の倍率 */
-  softRate: { hard: 0.65, soft: 1.35 },
-  /** 軟打志向は軟打の落とし所がうまい（狙いの候補を増やす） */
-  softTipCandidates: 3,
+  softRate: { hard: 0.65, soft: 1.3 },
+  /** 強打志向の軟打の減らし方の男女の重み（女子は強打志向が得になりすぎるため、1に近づける割合） */
+  hardSoftRateK: { male: 1, female: 0.5 } as Record<Gender, number>,
+  /** 軟打志向は軟打の落とし所がうまい（この割合で、狙いの候補を1つ増やす）。女子は軟打の質が効くので大きく */
+  softTipExtraChance: { male: 0.5, female: 1 } as Record<Gender, number>,
   /**
    * コミット寄り／リード寄り：時間差のフェイクに掛かる割合の倍率と、反応の早さ（秒、マイナスほど早い）。
    * コミットは速攻に早いがサイドに遅れる（速攻の多い相手に得）。リードはその逆（エース中心の相手に得）
@@ -513,9 +521,11 @@ export const STYLE = {
    * 積極は届く範囲が広いが強打を弾きやすい（フェイントの多い相手に得）。消極は範囲が狭いが強打も確実に上げる（強打の多い相手に得）
    */
   defense: {
-    active: { reach: 0.2, skillPerPressure: -0.2, noise: 1.25 },
-    passive: { reach: -0.1, skillPerPressure: 0.2, noise: 0.75 },
+    active: { reach: 0.3, skillPerPressure: -0.12, noise: 1.2 },
+    passive: { reach: -0.2, skillPerPressure: 0.12, noise: 0.8 },
   },
+  /** 届く距離の増減の男女の重み（女子は軟打が多く、届く範囲の差が効きすぎるため小さくする） */
+  defenseReachK: { male: 1, female: 0.5 } as Record<Gender, number>,
   /** オーバー派／アンダー派：サーブレシーブの技量の増減（揺れるサーブ・強いサーブ） */
   receiving: {
     overhand: { float: 6, hard: -6 },
@@ -601,4 +611,15 @@ export const REBOUND = {
   landU: [1.0, 3.0] as [number, number],
   flight: 0.8,
   pressure: 8,
+};
+
+/** ブロード（解禁型）：ミドルがセッターの後ろへ横に走り、片足で踏み切って空中で横に流れて打つ移動攻撃 */
+export const BROAD = {
+  /** 打つレーン（攻撃側の自コートの v。セッターの後ろ、ライト寄り） */
+  lane: -2.7,
+  /** 踏み切る位置：打つ点よりコートの中央寄り（v）に、ネットから少し離れて */
+  driftV: 1.0,
+  takeoffBackU: 0.25,
+  /** 空中で横に流れる時間（ジャンプ全体に対する割合） */
+  driftDurRatio: 0.55,
 };

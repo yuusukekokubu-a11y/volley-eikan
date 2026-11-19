@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -407,8 +407,8 @@ class RallySim {
     };
   }
 
-  private jump(c: CourtPlayer, t: number, dur: number, heightM: number) {
-    this.events.push({ type: 'jump', t: round(t), playerId: c.p.id, dur: round(dur), height: round(heightM) });
+  private jump(c: CourtPlayer, t: number, dur: number, heightM: number, oneFoot = false) {
+    this.events.push({ type: 'jump', t: round(t), playerId: c.p.id, dur: round(dur), height: round(heightM), ...(oneFoot ? { oneFoot: true } : {}) });
     this.busyUntil.set(c.p.id, t + dur);
     this.load[c.p.id] += LOAD.jump;
   }
@@ -770,7 +770,7 @@ class RallySim {
       // 緑：積極守備は届く範囲が広く、消極守備は狭い
       const ds = styleOf(c.p, 'defense');
       const reach = this.reachDist(c, Math.max(0, this.timeToReact(c, inc.tArrive, inc.flight) - (inc.readDelay ?? 0)))
-        + (ds ? STYLE.defense[ds].reach : 0);
+        + (ds ? STYLE.defense[ds].reach * STYLE.defenseReachK[this.input.gender] : 0);
       // セッターは2本目のために、なるべく1本目を触らない
       const margin = reach - d - (c.role === 'S' && inc.kind !== 'serve' ? 0.8 : 0);
       if (!best || margin > best.margin) best = { c, margin, d, reach };
@@ -938,6 +938,8 @@ class RallySim {
       if (c.role === 'S' || c.role === 'L' || c === tosser) continue;
       if (c.role === 'MB') {
         if (can('quick')) options.push({ c, type: 'quick', w: tw.quick, lane: LANE_V.quick });
+        // ブロード（解禁型）：セッターの後ろへ横に走って、片足で踏み切る
+        if (can('broad') && canDo(c.p, 'broad')) options.push({ c, type: 'broad', w: tw.broad, lane: BROAD.lane });
         if (can('timeDiff')) options.push({ c, type: 'timeDiff', w: tw.timeDiff, lane: LANE_V.timeDiff });
         options.push({ c, type: 'high', w: tw.high * 0.3, lane: LANE_V.timeDiff * 0.5 });
       } else wings.push(c);
@@ -982,7 +984,7 @@ class RallySim {
     if (!useSetter) ssc.push('setSecondary');
     if (bu.offset > SET.maxOffset.fast) ssc.push('setBadPass');
     if (bu.spin > SET.spinScene) ssc.push('setSpin');
-    if (choice && (choice.type === 'quick' || choice.type === 'timeDiff')) ssc.push('setQuick');
+    if (choice && isQuickType(choice.type)) ssc.push('setQuick');
     if (choice && choice.lane < bu.at.v - 0.5) ssc.push('setBack');
     const tossSkill = this.skill(tosser, ssc) * (useSetter ? aptitudeFactor(tosser.p, 'S') : SET.secondarySkill);
     const errScale = SET.errBase * (1 + bu.offset * SET.errOffsetK + bu.spin * SET.errSpinK) * Math.max(0.2, SET.skillPivot - tossSkill / 100);
@@ -1013,7 +1015,7 @@ class RallySim {
     // 助走：計画どおりに始め、トスのずれを見て途中で踏み切る位置を直す。直しきれない分は残る
     const plan = this.approachPlan(attacker, setType, choice.lane, bu.t, tHit, attacker.p.id === bu.firstToucher ? bu.tPass + 0.1 : -Infinity);
     const asc: Scene[] = ['attack'];
-    if (setType === 'quick' || setType === 'timeDiff') asc.push('attackQuick');
+    if (isQuickType(setType)) asc.push('attackQuick');
     if (!useSetter) asc.push('attackSecondary');
     const aTech = this.skill(attacker, asc);
     const tNom = tHit - TIMING.jumpRise;
@@ -1030,7 +1032,10 @@ class RallySim {
     this.ballTo(this.world(team, hit, hitZ), tHit, 'set', Math.max(hitZ, this.hitCm(attacker) / 100) + TIMING.setApexAbove[setType] + (useSetter ? 0 : 0.5));
 
     // バックアタックはアタックラインを踏まない所で踏み切る
-    const take: Local = { u: setType === 'back' ? Math.max(BACK_ATTACK.minTakeoffU, hit.u + APPROACH.takeoffBack) : hit.u + APPROACH.takeoffBack, v: hit.v };
+    // ブロードは打つ点より手前（コートの中央寄り）で踏み切り、空中で横に流れて打つ
+    const take: Local = setType === 'back' ? { u: Math.max(BACK_ATTACK.minTakeoffU, hit.u + APPROACH.takeoffBack), v: hit.v }
+      : setType === 'broad' ? { u: hit.u + BROAD.takeoffBackU, v: hit.v + BROAD.driftV }
+      : { u: hit.u + APPROACH.takeoffBack, v: hit.v };
     if (setType === 'timeDiff') {
       // 時間差：速攻の時刻に踏み込んで止まり（フェイク）、その場でもう一度跳ぶ
       const tFake = plan.tTakeNom + plan.late;
@@ -1086,7 +1091,9 @@ class RallySim {
   private approachPlan(c: CourtPlayer, type: SetType, lane: number, tSet: number, tHit: number, notBefore = -Infinity): ApproachPlan {
     // 時間差は、速攻の時刻に踏み込む（フェイク）ところまでを助走とする
     const tTakeNom = (type === 'timeDiff' ? tSet + TIMING.setFlight.quick : tHit) - TIMING.jumpRise;
-    const take: Local = { u: type === 'back' ? BACK_ATTACK.hitU + APPROACH.takeoffBack : HIT_U + APPROACH.takeoffBack, v: lane };
+    const take: Local = type === 'back' ? { u: BACK_ATTACK.hitU + APPROACH.takeoffBack, v: lane }
+      : type === 'broad' ? { u: HIT_U + BROAD.takeoffBackU, v: lane + BROAD.driftV }
+      : { u: HIT_U + APPROACH.takeoffBack, v: lane };
     const v = this.approachSpeed(c);
     const full = APPROACH.fullLen[type];
     const earliest = type === 'high' ? tSet + readTime(this.skill(c, ['attack']))
@@ -1150,7 +1157,7 @@ class RallySim {
     const netCm = this.netH * 100;
     const n = (this.attackCount.get(a.p.id) ?? 0) + 1;
     this.attackCount.set(a.p.id, n);
-    const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
+    const quick = isQuickType(sb.setType);
     const sc: Scene[] = ['attack'];
     if (sb.miss > ATTACK.softBadSetFrom) sc.push('attackBadSet');
     if (quick) sc.push('attackQuick');
@@ -1189,19 +1196,22 @@ class RallySim {
     const judge = this.skill(a, sc) / 100;
     const hs = styleOf(a.p, 'hitting');
     const softRate = (ATTACK.softBase + (sb.miss > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
-      + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge) * (hs ? STYLE.softRate[hs] : 1);
+      + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge) * (hs ? this.softRateK(hs) : 1);
     const soft = !canHard || (!sb.direct && this.rng.chance(softRate));
     if (soft) sc.push('tip');
     const tech = this.skill(a, sc);
     const power = (this.phys(a, 'power', sc) * ATTACK.power + tech * ATTACK.tech
       + (hitCm - netCm) * ATTACK.height * this.w.physical - penalty) * (soft ? ATTACK.softPowerRatio : 1)
-      * (sb.setType === 'back' ? BACK_ATTACK.powerRatio : 1);
+      * (sb.setType === 'back' ? BACK_ATTACK.powerRatio : 1)
+      * (!soft && sb.course === 'cross' ? STYLE.crossPower[this.input.gender] : 1);
     const errRate = clamp((ATTACK.errBase + sb.miss * ATTACK.errPerMiss - (tech - 50) * ATTACK.errTechSlope + slow * ATTACK.quickSpeedErr)
-      * (soft ? ATTACK.softErrRatio : sb.course ? STYLE.course[sb.course].err : 1), 0.01, 0.6);
+      * (soft ? ATTACK.softErrRatio : sb.course ? this.courseErr(sb.course) : 1), 0.01, 0.6);
     const overBlock = blockers.length > 0 && hitCm - maxReach >= BLOCK.overMarginCm;
 
     // 打ち手・ブロッカーの動き
-    this.jump(a, sb.tTake, TIMING.jumpTotal, sb.jumpM);
+    this.jump(a, sb.tTake, TIMING.jumpTotal, sb.jumpM, sb.setType === 'broad');
+    // ブロード：空中で横に流れて、打つ点の下へ
+    if (sb.setType === 'broad') this.moveTo(a, { u: sb.hit.u + 0.1, v: sb.hit.v }, sb.tTake, { dur: TIMING.jumpTotal * BROAD.driftDurRatio });
     const tBlock = sb.tHit + 0.04;
     for (const b of blockers) {
       this.jump(b.cp, sb.tHit - TIMING.blockRise, TIMING.blockTotal, (b.reachCm - standingReachCm(b.cp.p.height)) / 100);
@@ -1253,7 +1263,7 @@ class RallySim {
     // フェイント・軟打：ブロックの上を越えて手前に落とす
     if (soft) {
       // 軟打志向は落とし所がうまい（狙いの候補を増やす）
-      const extra = hs === 'soft' ? STYLE.softTipCandidates : 0;
+      const extra = hs === 'soft' && this.rng.chance(STYLE.softTipExtraChance[this.input.gender]) ? 1 : 0;
       const land = this.aim(opp, ATTACK.tipTargetU, TIMING.tipFlight, tech, blockers, sb.tHit, ATTACK.targetV, extra);
       return {
         kind: 'incoming',
@@ -1272,9 +1282,9 @@ class RallySim {
       let wallTouch = 0;
       for (const b of blockers) {
         const read = b.readCourse && b.readCourse === sb.course ? STYLE.courseReadWall : 1;
-        // コースの性質：ストレートは間に合ったブロックに止められやすく、遅れたブロックは抜きやすい
+        // コースの性質：ストレートは強いブロックに止められやすく、弱い・遅れたブロックは抜きやすい
         const cw = sb.course ? STYLE.course[sb.course] : undefined;
-        const courseK = cw ? (b.timing >= 1 ? cw.wallOnTime : cw.wallLate) : 1;
+        const courseK = cw ? Math.pow(Math.max(1, this.blockSkill(b.cp, b.sc)) / cw.blockPivot, cw.blockPow) * (b.timing >= 1 ? 1 : cw.lateK) : 1;
         wallTouch += b.timing * (this.blockSkill(b.cp, [...b.sc, 'blockTouch']) / 100) * read * courseK
           * (sb.setType === 'back' ? BACK_ATTACK.wallRatio : 1)
           * clamp(1 + (b.reachCm - hitCm) / BLOCK.heightFactorDivCm, 0.1, 1.5);
@@ -1388,12 +1398,24 @@ class RallySim {
     };
   }
 
+  /** コースごとのミスの率の倍率（ストレートのアウトしやすさは男女で重みが違う） */
+  private courseErr(course: 'straight' | 'cross'): number {
+    const e = STYLE.course[course].err;
+    return course === 'straight' ? 1 + (e - 1) * STYLE.straightErrK[this.input.gender] : e;
+  }
+
+  /** 強打志向／軟打志向の、軟打に切り替える割合の倍率（強打志向は男女で重みが違う） */
+  private softRateK(hs: 'hard' | 'soft'): number {
+    const r = STYLE.softRate[hs];
+    return hs === 'hard' ? 1 + (r - 1) * STYLE.hardSoftRateK[this.input.gender] : r;
+  }
+
   /** ブロックに跳ぶ選手と、その間に合い具合 */
   private blockers(sb: SetBall): Blocker[] {
     const def = other(sb.team);
     const laneDef = -sb.hit.v;
     const tAvail = sb.direct ? DIRECT.blockTime : TIMING.setFlight[sb.setType] + (sb.secondary ? TIMING.secondarySetExtra : 0) + BLOCK.readExtra;
-    const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
+    const quick = isQuickType(sb.setType);
     const sc: Scene[] = quick ? ['blockQuick'] : [];
     const front = [...this.frontSlots(def).keys()].filter(c => c.role !== 'L');
     // トスが上がった時に記録の上でいる位置（ブロックの基本位置へ動いている途中ならその途中）から判定する
@@ -1584,4 +1606,9 @@ export function bulgeForApex(z0: number, z1: number, apex: number): number {
   const k = h - z0 - d / 2;
   const disc = k * k - (d * d) / 4;
   return (k + Math.sqrt(Math.max(0, disc))) / 2;
+}
+
+/** 速い攻撃（速攻・時間差・ブロード）。特能の場面（速攻のトス・速攻を打つ・速攻に跳ぶ）と、スピードが要るかに使う */
+function isQuickType(t: SetType): boolean {
+  return t === 'quick' || t === 'timeDiff' || t === 'broad';
 }

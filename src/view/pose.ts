@@ -34,6 +34,8 @@ export const LEG_POSES = {
 };
 
 const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+/** 片足踏み切りで引き上げる脚の形 */
+const ONE_FOOT_KNEE = { thigh: 1.45, knee: 1.75 };
 /** 踏み切り前に腕を後ろへ引いた角度 */
 const ARM_BACK = -PI * 0.6;
 const smooth = (k: number) => {
@@ -115,6 +117,13 @@ export function targetJoints(pl: PlayerFrame, runPhase: number): Joints {
     }
     thighN = leg.thigh; kneeN = leg.knee; thighF = leg.thigh - 0.1; kneeF = leg.knee + 0.05;
     lean = leg.lean;
+    if (pl.oneFoot && pl.jumpPhase !== 'land') {
+      // 片足踏み切り（ブロード）：踏み切る脚（手前）で踏み込み、奥の脚は膝を高く引き上げる
+      const up = pl.jumpPhase === 'prep' ? smooth(pl.jumpT) : 1 - 0.4 * smooth(pl.jumpT);
+      thighF = mix(thighF, ONE_FOOT_KNEE.thigh, up);
+      kneeF = mix(kneeF, ONE_FOOT_KNEE.knee, up);
+      if (pl.jumpPhase === 'air') { thighN = mix(LEG_POSES.airStraight.thigh, 0.3, pl.jumpT); kneeN = LEG_POSES.airStraight.knee; }
+    }
   } else if (pl.pose === 'receive' || pl.pose === 'dig' || pl.pose === 'cover') {
     leg = LEG_POSES.receive;
     thighN = leg.thigh; kneeN = leg.knee; thighF = leg.thigh - 0.15; kneeF = leg.knee; lean = leg.lean;

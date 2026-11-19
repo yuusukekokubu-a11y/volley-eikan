@@ -71,4 +71,21 @@ describe('解禁型の動作', () => {
     expect(rallies(null, []).some(isRebound)).toBe(false);
     expect(rallies('rebound', ['OH', 'OP', 'MB']).filter(isRebound).length).toBeGreaterThan(10);
   });
+
+  it('ブロード：特能がなければ出ない。持っていればミドルが片足で踏み切り、空中で横に流れて打つ', () => {
+    expect(rallies(null, []).some(r => actions(r).some(e => e.info?.setType === 'broad'))).toBe(false);
+    let n = 0;
+    for (const r of rallies('broad', ['MB'])) {
+      for (const e of actions(r)) {
+        if (e.info?.setType !== 'broad' || (e.action !== 'spike' && e.action !== 'tip')) continue;
+        n++;
+        expect(r.placements.find(p => p.playerId === e.playerId)!.role).toBe('MB');
+        const jump = r.events.filter((x): x is Extract<RallyEvent, { type: 'jump' }> => x.type === 'jump' && x.playerId === e.playerId && x.t < e.t).pop()!;
+        expect(jump.oneFoot).toBe(true);
+        // 踏み切った後に横へ流れる移動がある
+        expect(r.events.some(x => x.type === 'move' && x.playerId === e.playerId && Math.abs(x.t - jump.t) < 1e-6)).toBe(true);
+      }
+    }
+    expect(n).toBeGreaterThan(10);
+  });
 });
