@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>動きの確認（1人だけ見る）</title>
+    <link rel="stylesheet" href="/src/view/inspect.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="view"><canvas></canvas></div>
+      <div id="top">
+        <div class="row" id="actions"></div>
+        <div id="info"></div>
+      </div>
+      <div id="bottom">
+        <div class="row" id="players"></div>
+        <input id="seek" type="range" min="0" max="10" step="0.01" value="0" />
+        <div class="row" id="controls">
+          <button id="back10" title="0.1秒戻す">−0.1</button>
+          <button id="back1" title="1コマ戻す">◀</button>
+          <button id="play">▶</button>
+          <button id="fwd1" title="1コマ進める">▶︎|</button>
+          <button id="fwd10" title="0.1秒進める">+0.1</button>
+          <button id="speed">×0.25</button>
+          <button id="angle">横から</button>
+          <button id="dim">他を薄く</button>
+          <button id="seedPrev">◀種</button>
+          <span id="seedLabel">種1</span>
+          <button id="seedNext">種▶</button>
+          <button id="gender">男子</button>
+        </div>
+      </div>
+      <div id="portrait">横向きにしてください</div>
+    </div>
+    <script type="module" src="/src/view/inspect.ts"></script>
+  </body>
+</html>

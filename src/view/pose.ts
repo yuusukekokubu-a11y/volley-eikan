@@ -35,7 +35,7 @@ export const LEG_POSES = {
 
 const mix = (a: number, b: number, k: number) => a + (b - a) * k;
 /** 踏み切り前に腕を後ろへ引いた角度 */
-const ARM_BACK = -PI * 0.38;
+const ARM_BACK = -PI * 0.6;
 const smooth = (k: number) => {
   const c = Math.min(1, Math.max(0, k));
   return c * c * (3 - 2 * c);

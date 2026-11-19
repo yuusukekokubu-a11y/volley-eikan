@@ -10,6 +10,34 @@ import { FigureB } from './figureB';
 import { Motion } from './motion';
 import type { Frame, PlayerFrame } from './playback';
 
+/** テレビ中継の角度のカメラ */
+const TV_CAMERA = v3(-1.0, -25, 12);
+const TV_LOOK = v3(0, 0.9, 1.6);
+/** 確認用の追いかけるカメラ */
+const FOLLOW_DIST = 6.5;
+const FOLLOW_FOV = 42;
+
+export type FollowView = 'side' | 'back' | 'front';
+
+/** 人形を薄くする（確認用）。元の材質は覚えておいて戻せるようにする */
+function setDim(fig: Figure, on: boolean) {
+  const apply = (o: THREE.Object3D) => {
+    const m = o as THREE.Mesh | THREE.Sprite;
+    if (!m.material || Array.isArray(m.material)) return;
+    const base = (m.userData.baseMat as THREE.Material | undefined) ?? m.material;
+    m.userData.baseMat = base;
+    if (on) {
+      const c = base.clone();
+      c.transparent = true;
+      c.opacity = 0.15;
+      c.depthWrite = false;
+      m.material = c;
+    } else m.material = base;
+  };
+  fig.root.traverse(apply);
+  apply(fig.shadow);
+}
+
 interface PlayerView {
   motion: Motion;
   fig: Figure;
@@ -24,6 +52,10 @@ export class Render3D {
   private ballShadow: THREE.Mesh;
   private net = new THREE.Group();
   private lastT = 0;
+  private size = { w: 844, h: 390 };
+  /** 確認用：追いかける選手と見る角度、ほかの選手を薄くするか */
+  private follow: { id: string; view: FollowView; dim: boolean } | null = null;
+  private camLook = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, private gender: Gender) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -45,8 +77,8 @@ export class Render3D {
     this.ballShadow.rotation.x = -Math.PI / 2;
     this.scene.add(this.ballShadow);
 
-    this.camera.position.copy(v3(-1.0, -25, 12));
-    this.camera.lookAt(v3(0, 0.9, 1.6));
+    this.camera.position.copy(TV_CAMERA);
+    this.camera.lookAt(TV_LOOK);
   }
 
   setGender(g: Gender) {
@@ -56,11 +88,19 @@ export class Render3D {
   }
 
   resize(w: number, h: number) {
+    this.size = { w, h };
     this.renderer.setSize(w, h, true);
     this.camera.aspect = w / h;
+    if (this.follow) {
+      this.camera.fov = FOLLOW_FOV;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+    this.camera.position.copy(TV_CAMERA);
+    this.camera.lookAt(TV_LOOK);
     // 横幅いっぱいに約23mが入るよう、縦の視野角を合わせる
     const halfW = 11.2;
-    const dist = this.camera.position.distanceTo(v3(0, 0.9, 1.6));
+    const dist = this.camera.position.distanceTo(TV_LOOK);
     const vfov = 2 * Math.atan(halfW / this.camera.aspect / dist) * (180 / Math.PI);
     this.camera.fov = Math.max(22, vfov);
     this.camera.updateProjectionMatrix();
@@ -79,6 +119,7 @@ export class Render3D {
         v = { motion: new Motion(pl), fig: this.makeFigure(pl) };
         this.players.set(pl.id, v);
         this.scene.add(v.fig.root, v.fig.shadow);
+        setDim(v.fig, !!this.follow?.dim && this.follow.id !== pl.id);
       }
       const ms = v.motion.update(pl, snap ? 0 : dt, fr);
       v.fig.update(pl, ms, fr);
@@ -95,7 +136,37 @@ export class Render3D {
     this.ballShadow.position.copy(v3(fr.ball.x, fr.ball.y, 0.012));
     const s = Math.max(0.5, 1 - fr.ball.z * 0.06);
     this.ballShadow.scale.set(s, s, s);
+    if (this.follow) this.followCamera(fr, snap ? 0 : dt);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 確認用：1人の選手をカメラで追いかける（id が null なら中継の角度に戻す）。
+   * view：side＝手前の横から、back＝後ろから、front＝前から。dim ならほかの選手を薄くする
+   */
+  setFollow(id: string | null, view: FollowView = 'side', dim = true) {
+    this.follow = id ? { id, view, dim } : null;
+    for (const [pid, v] of this.players) setDim(v.fig, !!this.follow?.dim && this.follow.id !== pid);
+    this.lastT = -1; // 次の描画でカメラをそのまま合わせる
+    this.resize(this.size.w, this.size.h);
+  }
+
+  private followCamera(fr: Frame, dt: number) {
+    const f = this.follow!;
+    const pl = fr.players.find(p => p.id === f.id);
+    if (!pl) return;
+    const forward = pl.team === 'A' ? 1 : -1; // 相手コートの方向（x）
+    const off = f.view === 'side' ? v3(0, -FOLLOW_DIST, 1.6)
+      : f.view === 'back' ? v3(-forward * FOLLOW_DIST * 0.9, -1.8, 2.0)
+      : v3(forward * FOLLOW_DIST * 0.9, -1.8, 2.0);
+    // 下の操作ボタンに足元が隠れないよう、見る点を低めにして選手を画面の上寄りに映す
+    const look = v3(pl.x, pl.y, pl.z + 0.45);
+    const want = look.clone().add(off);
+    const k = dt <= 0 ? 1 : 1 - Math.exp(-6 * dt);
+    this.camera.position.lerp(want, k);
+    this.camLook.lerp(look, k);
+    if (dt <= 0) { this.camera.position.copy(want); this.camLook.copy(look); }
+    this.camera.lookAt(this.camLook);
   }
 
   /** 選手が入れ替わった時（新しいラリー）に古い人形を消す */

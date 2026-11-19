@@ -30,6 +30,9 @@ export interface MotionState {
   air: boolean;
   /** なめらかにつなぐための係数（1フレーム分）。0 は「そのまま合わせる」 */
   k: number;
+  /** 走る脚の振りの位相と、走りの強さ（0〜1.2。止まっている・跳んでいる時は0） */
+  runPhase: number;
+  runAmt: number;
 }
 
 export class Motion {
@@ -81,7 +84,9 @@ export class Motion {
       const rel = wrap(Math.atan2(fr.ball.y - pl.y, fr.ball.x - pl.x) - this.yaw);
       twist = clampN(rel * 0.3, -0.45, 0.45);
     }
-    return { j, yaw: this.yaw, lean, roll, twist, still, sway, air: pl.jumpPhase === 'air', k };
+    const running = pl.speed > 0.5 && pl.jumpPhase === 'none' && pl.pose !== 'dive';
+    const runAmt = running ? Math.min(1.2, pl.speed / 4.5) : 0;
+    return { j, yaw: this.yaw, lean, roll, twist, still, sway, air: pl.jumpPhase === 'air', k, runPhase: this.runPhase, runAmt };
   }
 }
 

@@ -24,6 +24,13 @@ const B = {
   shoe: [0.085, 0.04, 0.05] as const,              // 靴（だ円体）の半径
 };
 
+/**
+ * 脚と腕がない分、動きを大げさに見せる倍率
+ *   crouch：しゃがみ・踏み込みで体が沈む量、stride：靴の前後の振り、lift：靴の持ち上げ、
+ *   bob：走る時の一歩ごとの体の上下（人形の大きさに対する割合）、handBack：手を後ろへ引いた時に腕を長く見せる量
+ */
+const EXAG = { crouch: 2.2, minHip: 0.3, stride: 1.7, lift: 1.8, bob: 0.07, handBack: 1.35 };
+
 const HAIR = new THREE.MeshLambertMaterial({ color: '#4a2f22' });
 const EYE = new THREE.MeshBasicMaterial({ color: '#1b1b1b' });
 const SHOE = new THREE.MeshLambertMaterial({ color: '#f6f6f6' });
@@ -98,28 +105,38 @@ export class FigureB implements Figure {
     const thigh = B.thigh * F, shin = B.shin * F;
     this.root.position.copy(v3(pl.x, pl.y, pl.z));
     this.root.rotation.y = ms.yaw;
-    // しゃがむ時は体が沈み、空中では靴を引き寄せる（腰の高さは保つ）
-    this.hipY = smoothHip(this.hipY, ms.air ? thigh + shin : hipHeight(j, thigh, shin), ms);
-    this.pitch.position.set(0, this.hipY, ms.sway);
+    // しゃがむ時は体が大きく沈み、空中では靴を引き寄せる（腰の高さは保つ）。走る時は一歩ごとに弾む
+    const straight = thigh + shin;
+    const bent = hipHeight(j, thigh, shin);
+    const sunk = Math.max(straight * EXAG.minHip, straight - (straight - bent) * EXAG.crouch);
+    const bob = EXAG.bob * F * ms.runAmt * Math.abs(Math.sin(ms.runPhase));
+    this.hipY = smoothHip(this.hipY, ms.air ? straight : sunk, ms);
+    this.pitch.position.set(0, this.hipY + bob, ms.sway);
     this.pitch.rotation.z = -j.pitch;
 
-    // 靴：見えない脚の先
-    const foot = (shoe: THREE.Mesh, t: number, k: number, side: number) => {
-      shoe.position.set(
-        thigh * Math.sin(t) + shin * Math.sin(t - k) + 0.02 * F,
-        -(thigh * Math.cos(t) + shin * Math.cos(t - k)) + B.shoe[1] * F,
-        side * B.hipSide * F,
-      );
+    // 靴：見えない脚の先。前後の振りと持ち上げを大きくし、沈んだ時も床に着いたまま
+    const fk = (t: number, k: number) => ({
+      x: thigh * Math.sin(t) + shin * Math.sin(t - k),
+      y: -(thigh * Math.cos(t) + shin * Math.cos(t - k)),
+    });
+    const fN = fk(j.thighN, j.kneeN), fF = fk(j.thighF, j.kneeF);
+    const ground = ms.air ? Math.min(fN.y, fF.y) : -(this.hipY + bob);
+    const foot = (shoe: THREE.Mesh, f: { x: number; y: number }, t: number, k: number, side: number, low: number) => {
+      const lift = (f.y - low) * EXAG.lift;
+      shoe.position.set(f.x * EXAG.stride + 0.02 * F, ground + lift + B.shoe[1] * F, side * B.hipSide * F);
       shoe.rotation.z = (t - k) * 0.6;
     };
-    foot(this.shoeN, j.thighN, j.kneeN, 1);
-    foot(this.shoeF, j.thighF, j.kneeF, -1);
+    const low = Math.min(fN.y, fF.y);
+    foot(this.shoeN, fN, j.thighN, j.kneeN, 1, low);
+    foot(this.shoeF, fF, j.thighF, j.kneeF, -1, low);
 
     this.upper.rotation.set(-ms.roll, ms.twist, -ms.lean);
     // 手：見えない腕の先（肘を曲げた分だけ腕が短くなる）
     const hand = (m: THREE.Mesh, angle: number, elbow: number, side: number) => {
       const a = angle + ms.lean;
-      const len = B.armLen * F * (1 - 0.3 * Math.min(1, elbow / 1.5));
+      // 後ろへ引いた手は大きく見せる
+      const back = a < 0 ? 1 + (EXAG.handBack - 1) * Math.min(1, -a / 1.2) : 1;
+      const len = B.armLen * F * (1 - 0.3 * Math.min(1, elbow / 1.5)) * back;
       m.position.set(len * Math.sin(a), B.shoulderY * F - len * Math.cos(a), side * B.shoulderSide * F);
     };
     hand(this.handN, j.armN, j.elbowN, 1);

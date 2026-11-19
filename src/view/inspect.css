@@ -1,0 +1,31 @@
+/* 動きの確認用の画面（ゲームの機能ではない） */
+:root { --panel: rgba(12, 18, 26, 0.78); --text: #f4f6f8; --on: #3f7de0; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; background: #1d2733; color: var(--text); overflow: hidden;
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  touch-action: manipulation; -webkit-user-select: none; user-select: none;
+}
+#app { position: fixed; inset: 0; }
+#view { position: absolute; inset: 0; }
+#view canvas { display: block; }
+#top { position: absolute; left: 0; right: 0; top: 0; padding: 4px 6px; pointer-events: none; }
+#bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px; display: flex; flex-direction: column; gap: 3px; }
+.row { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; pointer-events: auto; align-items: center; }
+.row::-webkit-scrollbar { display: none; }
+button {
+  flex: 0 0 auto; min-width: 44px; height: 40px; padding: 0 9px; border: 0; border-radius: 9px;
+  background: var(--panel); color: var(--text); font-size: 14px; font-weight: 700;
+}
+button.on { background: var(--on); }
+button:active { filter: brightness(1.4); }
+button.A { border-left: 5px solid #d23b3b; }
+button.B { border-left: 5px solid #2f63c9; }
+#seedLabel { flex: 0 0 auto; padding: 0 4px; font-size: 13px; background: var(--panel); border-radius: 8px; line-height: 40px; }
+#info {
+  margin-top: 4px; display: inline-block; max-width: 70%; padding: 4px 8px; border-radius: 8px;
+  background: var(--panel); font-size: 12px; line-height: 1.45; white-space: pre-line;
+}
+#seek { width: 100%; height: 26px; margin: 0; accent-color: var(--on); }
+#portrait { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; background: #1d2733; font-size: 20px; }
+@media (orientation: portrait) and (max-width: 700px) { #portrait { display: flex; } }

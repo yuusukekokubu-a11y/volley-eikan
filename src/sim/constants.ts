@@ -86,7 +86,7 @@ export const TIMING = {
   serveFlight: { float: 1.35, jumpFloat: 1.2, spike: 0.9 } as Record<ServeType, number>,
   passFlight: 1.1,
   passFlightPerOffset: 0.08,
-  setFlight: { quick: 0.35, timeDiff: 0.7, fast: 0.55, high: 1.35 } as Record<SetType, number>,
+  setFlight: { quick: 0.35, timeDiff: 0.7, fast: 0.55, high: 1.65 } as Record<SetType, number>,
   secondarySetExtra: 0.2,
   /** トスの最高点が打点よりどれだけ上か（m） */
   setApexAbove: { quick: 0.25, timeDiff: 0.7, fast: 0.6, high: 3.0 } as Record<SetType, number>,
@@ -250,7 +250,7 @@ export const BLOCK = {
   touchTechDiv: 110,
   /** 触った時：シャット確率 = sigmoid((ブロック力-攻撃力)/killScale + killBase) */
   killScale: 12,
-  killBase: 0.3,
+  killBase: 0.1,
   /** シャットの勝負で、打ち手のテクニック（ずらして当てる上手さ）が攻撃力に足される量 */
   killTech: 0.45,
   power: { base: 30, block: 0.5, height: 0.4, extra: 5 },
@@ -274,14 +274,14 @@ export const APPROACH = {
   /** 十分な助走の長さ（m）。これより短いと跳ぶ高さが下がる */
   fullLen: { quick: 1.6, timeDiff: 1.6, fast: 2.6, high: 2.9 } as Record<SetType, number>,
   /** 助走の平均の速さ（m/s）＝ base ＋ スピード × per */
-  speedBase: 2.4,
-  speedPer: 0.032,
+  speedBase: 1.7,
+  speedPer: 0.024,
   /** 助走なしで跳んだ時の跳び上がりの割合（十分な助走で1） */
   standingRatio: 0.75,
   /** 踏み切る位置：打つ点よりこれだけネットから離れた所で踏み切り、空中で前へ流れる */
   takeoffBack: 0.4,
   /** 平行はトスの少し前から助走を始める（秒） */
-  fastLead: 0.6,
+  fastLead: 0.85,
   /** 助走の途中で踏み切る位置を直す速さ（m/s）＝ base ＋ スピード × per */
   adjustBase: 1.4,
   adjustPer: 0.02,
