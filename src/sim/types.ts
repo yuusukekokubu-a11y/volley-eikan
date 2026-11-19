@@ -1,5 +1,7 @@
 // 試合計算の入出力の型。描画側はここの RallyRecord だけを読む。
 
+import type { StatEffect } from './traits';
+
 export type Gender = 'male' | 'female';
 export type TeamId = 'A' | 'B';
 
@@ -54,6 +56,8 @@ export interface TeamState {
   tactics: Tactics;
   /** 選手ごとの疲れ 0〜1。試合側で積み上げて渡す */
   fatigue?: Record<string, number>;
+  /** チーム全員にかかる一時的な能力の上下（タイムアウトの監督特能など）。特能と同じ「場面・能力・段階」の形 */
+  buffs?: StatEffect[];
 }
 
 export interface RallyContext {

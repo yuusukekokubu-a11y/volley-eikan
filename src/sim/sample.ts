@@ -53,3 +53,10 @@ export function rotate(team: TeamState): TeamState {
   const r = team.rotation;
   return { ...team, rotation: [...r.slice(1), r[0]] };
 }
+
+/** 控えの選手（各ポジション1人ずつ、計4人）。背番号は8〜11 */
+export function makeBench(seed: number, name: string, gender: Gender, avg: Strength): Player[] {
+  const rng = new Rng(seed * 7 + 3);
+  const roles: Exclude<Role, 'L'>[] = ['S', 'OH', 'MB', 'OP'];
+  return roles.map((role, i) => makePlayer(rng, `${name}${8 + i}`, 8 + i, role, gender, avg - 3));
+}

@@ -271,7 +271,10 @@ class RallySim {
     const set = new Set<Scene>(['all', ...scenes]);
     if (this.clutch) set.add('clutch');
     const row = { front: c.front, teammates: this.court[c.team].map(m => ({ p: m.p, front: m.front })) };
-    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row));
+    // チームにかかっている一時的な上下（タイムアウトの監督特能など）
+    let buff = 0;
+    for (const e of this.input.teams[c.team].buffs ?? []) if (e.ability === k && set.has(e.scene)) buff += e.delta;
+    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row) + buff);
   }
   /** 体の能力（跳躍・パワー・スピード）が判定に効く量。男女の重みを掛ける */
   private phys(c: CourtPlayer, k: 'jump' | 'power' | 'speed', scenes: Scene[] = []): number {

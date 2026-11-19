@@ -387,3 +387,41 @@ export const RECORD = {
 
 /** 安全のための打数の上限（無限ラリー防止） */
 export const MAX_CONTACTS = 60;
+
+// ---------------- 1セットの進行（仕様「試合の采配」） ----------------
+export const MATCH = {
+  /** セットの点数（最終セットは15点）。2点差がつくまで続く */
+  setPoints: 25,
+  finalSetPoints: 15,
+  winBy: 2,
+  /** 1セットのタイムアウトと交代の回数 */
+  timeouts: 2,
+  substitutions: 6,
+  /** タイムアウトの効果が続くラリー数 */
+  timeoutRallies: 5,
+  /** 定期の停止（どちらかの点数がこの点に達した時。0は試合開始時） */
+  periodicStops: [0, 10, 20],
+  /** 最終セットの定期の停止（8点はコートチェンジと同時） */
+  finalPeriodicStops: [0, 8],
+  finalCourtChange: 8,
+  /** 連続失点での停止：点数帯（両チームの高い方）ごとの、止まる連続失点 */
+  streakStops: [
+    { from: 0, streak: 4 }, { from: 10, streak: 3 }, { from: 20, streak: 2 },
+  ],
+  finalStreakStops: [
+    { from: 0, streak: 3 }, { from: 8, streak: 2 },
+  ],
+  /** 自チームがこれ以上リードしている時は、止まる連続失点を1つ増やす */
+  leadForLooserStop: 5,
+};
+
+// ---------------- 疲れ（スタミナ） ----------------
+export const FATIGUE = {
+  /** 1ラリーの負荷1あたりの疲れ＝ perLoad × (pivot − スタミナ/100) */
+  perLoad: 0.006,
+  pivot: 1.5,
+  /** ベンチにいる選手は1ラリーごとにこれだけ回復する */
+  benchRecover: 0.01,
+  /** 停止画面で「足が止まってきた」と出す疲れ */
+  tiredNote: 0.45,
+};
