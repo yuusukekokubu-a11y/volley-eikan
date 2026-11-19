@@ -718,9 +718,17 @@ class RallySim {
     let tosser: CourtPlayer;
     if (useSetter) tosser = setter!;
     else {
+      // 落下点に間に合う選手を候補にし、役割の優先順位（リベロ → 後衛 → 前衛のアウトサイド・オポジット → ミドル）で選ぶ。
+      // 同じ順位の中では一番近い選手。誰も間に合わなければ一番近い選手
       const pool = list.filter(c => c.p.id !== bu.firstToucher && c !== setter);
-      const near = (c: CourtPlayer) => dist(this.posAt(c, bu.tPass), bu.at) - (c.role === 'L' ? 1 : 0);
-      tosser = pool.reduce((a, b) => (near(b) < near(a) ? b : a));
+      const near = (c: CourtPlayer) => dist(this.posAt(c, bu.tPass), bu.at);
+      const rank = (c: CourtPlayer) => (c.role === 'L' ? 0 : !c.front ? 1 : c.role === 'MB' ? 3 : 2);
+      const ok = pool.filter(c => chase(c).ok);
+      const cands = ok.length ? ok : pool;
+      tosser = cands.reduce((a, b) => {
+        if (ok.length && rank(a) !== rank(b)) return rank(b) < rank(a) ? b : a;
+        return near(b) < near(a) ? b : a;
+      });
     }
     // パスが上がったら（読む時間の後）すぐ落下点へ動き、着いてからトスの構え
     this.moveTo(tosser, bu.at, this.freeAt(tosser, bu.tPass) + readTime(this.skill(tosser, ['set'])), { arriveBy: bu.t, asap: true });
