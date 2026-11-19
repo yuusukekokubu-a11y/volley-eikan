@@ -3,22 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <title>試合の描画（試作）</title>
+    <title>試合（1セット・試作）</title>
     <link rel="stylesheet" href="/src/view/style.css" />
   </head>
   <body>
     <div id="app">
       <div id="view"><canvas></canvas></div>
       <div id="hud">
-        <div id="score"><span class="a">赤</span> <b id="sa">0</b> - <b id="sb">0</b> <span class="b">青</span></div>
+        <div id="score">
+          <span class="a">赤</span> <b id="sa">0</b> - <b id="sb">0</b> <span class="b">青</span>
+          <span id="setInfo"></span>
+          <div id="tos"><span class="a" id="toA"></span><span class="b" id="toB"></span></div>
+        </div>
         <div id="msg"></div>
-        <div id="info"></div>
       </div>
       <div id="controls">
         <button id="btnPlay">❚❚</button>
         <button id="btnSpeed">1倍</button>
-        <button id="btnNext">次へ</button>
+        <button id="btnMode">フル</button>
         <button id="btnGender">男子</button>
+      </div>
+      <div id="stop" class="hidden">
+        <div id="stopMain">
+          <div id="stopLeft"></div>
+          <div id="stopRight"></div>
+        </div>
+        <div id="stopButtons"></div>
       </div>
       <div id="portrait">横向きにしてください</div>
     </div>

@@ -57,3 +57,37 @@ html, body {
 @media (orientation: portrait) and (max-width: 700px) {
   #portrait { display: flex; }
 }
+
+/* ---------- 1セットの試合（試作） ---------- */
+#setInfo { margin-left: 8px; font-size: 13px; opacity: 0.85; }
+#tos { font-size: 12px; display: flex; gap: 10px; margin-top: 2px; }
+#stop {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  background: #0c121a; padding: 8px; gap: 6px; z-index: 5;
+}
+#stop.hidden { display: none; }
+#stopMain { flex: 1; display: flex; gap: 8px; min-height: 0; }
+#stopLeft { flex: 0 0 34%; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+#stopRight { flex: 1; overflow-y: auto; }
+.card { background: rgba(255, 255, 255, 0.07); border-radius: 10px; padding: 8px 10px; }
+.big { font-size: 22px; font-weight: 800; }
+.reason { font-size: 16px; font-weight: 700; color: #ffd36b; }
+.rot { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; font-size: 12px; text-align: center; }
+.rot div { background: rgba(255,255,255,0.1); border-radius: 5px; padding: 3px 0; }
+.rot .net { grid-column: 1 / 4; background: none; font-size: 10px; opacity: 0.7; padding: 0; }
+table.roster { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.roster td, table.roster th { padding: 4px 5px; border-bottom: 1px solid rgba(255,255,255,0.08); text-align: left; }
+table.roster th { font-size: 11px; opacity: 0.7; font-weight: 600; }
+table.roster tr.bench td { opacity: 0.8; }
+table.roster .tired { color: #ff9d7a; font-size: 12px; }
+#stopButtons { display: flex; gap: 6px; flex-wrap: wrap; }
+#stopButtons button, #stopRight button.pick {
+  min-height: 46px; padding: 0 14px; border: 0; border-radius: 10px;
+  background: #2f63c9; color: #fff; font-size: 15px; font-weight: 700;
+}
+#stopButtons button.sub { background: rgba(255,255,255,0.14); }
+#stopButtons button:disabled { opacity: 0.35; }
+#stopRight button.pick { background: rgba(255,255,255,0.12); margin: 3px; }
+#stopRight button.pick.on { background: #2f63c9; }
+.picklist { display: flex; flex-wrap: wrap; }
+.hint { font-size: 12px; opacity: 0.75; margin: 4px 0; }
