@@ -483,3 +483,15 @@ export const TRAIT_EXTRA = {
   fatigueAllOut: 1.3,
   fatigueSlacker: 0.7,
 };
+
+/** サーブの選び方：持っているサーブ（フローターは全員）から、見積もりで選ぶ。判断はテクニック（場面 serveChoice） */
+export const SERVE_CHOICE = {
+  /** パスが良い時・悪い時のサイドアウトの目安（見積もり用） */
+  sideoutGood: 0.62,
+  sideoutBad: 0.42,
+  /** 見積もりのぶれ＝ noise ×（pivot − 判断/100）。テクニックが低いほどぶれる */
+  noise: 0.01,
+  pivot: 1.4,
+  /** 緑：強気サーブはミスを軽く、安全サーブは重く見る（ミスの見積もりに掛ける） */
+  faultWeight: { aggressive: 0.7, safe: 1.4 },
+};

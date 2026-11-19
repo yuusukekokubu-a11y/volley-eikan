@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -158,6 +158,8 @@ class RallySim {
   private clutch: boolean;
   /** このラリーで各選手が打った回数（連続トスの場面用） */
   private attackCount = new Map<string, number>();
+  /** このラリーのサーブの種類（準備の時にサーバーが選ぶ） */
+  private serveType: ServeType = 'float';
 
   constructor(private input: RallyInput) {
     this.rng = new Rng(input.seed);
@@ -218,11 +220,14 @@ class RallySim {
       for (const c of list) this.load[c.p.id] = 0;
     }
 
-    // 最初の並び：サーブ側は基本の位置、レシーブ側はサーブレシーブの隊形
+    // サーバーが打つサーブの種類を選ぶ
     const s = this.input.serving;
+    this.serveType = this.chooseServe(this.court[s].find(c => c.zoneIdx === 0)!, other(s));
+
+    // 最初の並び：サーブ側は基本の位置、レシーブ側はサーブレシーブの隊形
     for (const c of this.court[s]) {
       const z = ZONE_POS[c.zoneIdx];
-      this.pos.set(c.p.id, c.zoneIdx === 0 ? serveStartSpot(serveTypeOf(c.p)) : { u: c.front ? 1.2 : z.u, v: z.v });
+      this.pos.set(c.p.id, c.zoneIdx === 0 ? serveStartSpot(this.serveType) : { u: c.front ? 1.2 : z.u, v: z.v });
     }
     this.placeReceiveFormation(other(s));
 
@@ -530,8 +535,8 @@ class RallySim {
     const st = this.input.serving;
     const rt = other(st);
     const server = this.court[st].find(c => c.zoneIdx === 0)!;
-    const type = serveTypeOf(server.p);
-    const sc: Scene[] = ['serve', type === 'float' ? 'serveFloat' : type === 'jumpFloat' ? 'serveJumpFloat' : 'serveSpike'];
+    const type = this.serveType;
+    const sc = this.serveScenes(server, type);
     const tech = this.skill(server, sc);
     const pc = SERVE.pressure[type];
     const R_ = SERVE_RUN;
@@ -623,6 +628,70 @@ class RallySim {
         apex, ballKind: 'serve', dropReason: 'ace', dropKey: server.p.id, sender: server,
       },
     };
+  }
+
+  private serveScenes(server: CourtPlayer, type: ServeType): Scene[] {
+    const sc: Scene[] = ['serve', type === 'float' ? 'serveFloat' : type === 'jumpFloat' ? 'serveJumpFloat' : 'serveSpike'];
+    const ctx = this.input.context;
+    if (ctx?.serveStreak) sc.push('serveStreak');
+    if (ctx?.subbedIn?.includes(server.p.id)) sc.push('pinchServe');
+    return sc;
+  }
+
+  /**
+   * サーブの種類を選ぶ。持っているサーブ（フローターは全員）ごとに「崩せそうな度合い－ミスしそうな度合い」を見積もり、
+   * 一番良いものを打つ。見積もりには自分の能力、相手レシーバーの得手不得手（揺れる球・強い球）、男女の重みが入る。
+   * 判断の正確さはテクニック（場面 serveChoice）。低いほど見積もりがぶれる。
+   * 結果の乱数の並びを変えないよう、選ぶための乱数は別に持つ。
+   */
+  private chooseServe(server: CourtPlayer, rt: TeamId): ServeType {
+    const types: ServeType[] = ['float'];
+    if (canDo(server.p, 'jumpFloat')) types.push('jumpFloat');
+    if (canDo(server.p, 'spikeServe')) types.push('spike');
+    if (types.length === 1) return 'float';
+    const rng = new Rng(this.input.seed * 7919 + 13);
+    const judge = this.skill(server, ['serve', 'serveChoice']);
+    const risk = styleOf(server.p, 'serveRisk');
+    const fw = risk ? SERVE_CHOICE.faultWeight[risk] : 1;
+    const recv = this.receivers(rt);
+    let best: { t: ServeType; v: number } | undefined;
+    for (const t of types) {
+      const e = this.serveEstimate(server, t, recv);
+      const v = (1 - e.fault * fw) * (1 - (SERVE_CHOICE.sideoutBad + (SERVE_CHOICE.sideoutGood - SERVE_CHOICE.sideoutBad) * e.pass))
+        + rng.normal() * SERVE_CHOICE.noise * Math.max(0.2, SERVE_CHOICE.pivot - judge / 100);
+      if (!best || v > best.v) best = { t, v };
+    }
+    return best!.t;
+  }
+
+  /** サーブの見積もり（乱数を使わない）：ミスの率と、レシーバーのパスの良さの期待値 */
+  private serveEstimate(server: CourtPlayer, type: ServeType, recv: CourtPlayer[]): { fault: number; pass: number } {
+    const R_ = SERVE_RUN;
+    const sc = this.serveScenes(server, type);
+    const tech = this.skill(server, sc);
+    const techK = Math.max(0.2, R_.techPivot - tech / 100);
+    const tossErr = 0.8 * R_.tossErr[type] * techK; // 正規乱数の絶対値の平均 ≒ 0.8
+    const adjust = R_.adjustTime[type] * (APPROACH.adjustBase + this.eff(server, 'speed') * APPROACH.adjustPer);
+    const bad = Math.max(tossErr * R_.minResidual, tossErr - adjust);
+    const risk = styleOf(server.p, 'serveRisk');
+    const rs = risk ? STYLE.serveRisk[risk] : { fault: 1, pressure: 0 };
+    const fault = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope) * rs.fault + bad * R_.faultPerMiss, 0.01, 0.7);
+    const pc = SERVE.pressure[type];
+    const pressure = pc.base + tech * pc.tech + this.phys(server, 'power', sc) * pc.power + this.phys(server, 'jump', sc) * pc.jump
+      - bad * R_.pressurePerMiss + rs.pressure;
+    const shake = SERVE.shake[type];
+    let pass = 0;
+    for (const c of recv) {
+      const rsc: Scene[] = ['serveReceive'];
+      if (shake > 0) rsc.push('receiveFloat');
+      if (pressure >= PASS.hardPressure) rsc.push('receiveHard');
+      const sk = PASS.skill.base + this.skill(c, rsc) * PASS.skill.tech * (c.role === 'L' ? aptitudeFactor(c.p, 'L') : 1)
+        + this.phys(c, 'speed', rsc) * PASS.skill.speed;
+      // 揺れ（ばらつき）の分だけ、パスの良さの期待値は真ん中に寄る
+      const sdv = PASS.noise + shake;
+      pass += sigmoid(((sk - pressure) / PASS.scale + PASS.base.serve) / Math.sqrt(1 + (Math.PI * sdv * sdv) / 8));
+    }
+    return { fault, pass: recv.length ? pass / recv.length : 0.5 };
   }
 
   /**
@@ -1331,12 +1400,6 @@ class RallySim {
   }
 }
 
-/** サーブの種類：ジャンフロとスパイクサーブは解禁特能が必要。両方あればスパイクサーブ */
-export function serveTypeOf(p: Player): ServeType {
-  if (canDo(p, 'spikeServe')) return 'spike';
-  if (canDo(p, 'jumpFloat')) return 'jumpFloat';
-  return 'float';
-}
 
 /** 打球を読んで動き出すまでの時間（テクニックから。男女の重みを掛けた値を渡す） */
 function readTime(tech: number): number {

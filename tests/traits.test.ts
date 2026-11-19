@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { serveTypeOf, simulateRally } from '../src/sim/rally';
+import { simulateRally } from '../src/sim/rally';
 import { makeTeam } from '../src/sim/sample';
 import { TRAITS, traitDelta, validateTrait, type Scene, type StatTrait } from '../src/sim/traits';
 
@@ -40,10 +40,23 @@ describe('特能の受け皿', () => {
     delete TRAITS.__cmd;
   });
 
-  it('サーブの種類は解禁特能で決まる（なければフローター）', () => {
-    expect(serveTypeOf({ ...base, traits: [] })).toBe('float');
-    expect(serveTypeOf({ ...base, traits: ['jumpFloat'] })).toBe('jumpFloat');
-    expect(serveTypeOf({ ...base, traits: ['spikeServe'] })).toBe('spike');
+  it('サーブの種類：解禁特能がなければフローターだけ。持っていれば、持っているサーブの中から選ぶ', () => {
+    const typesOf = (traits: string[], gender: 'male' | 'female' = 'male') => {
+      const A = makeTeam(1, 'A', gender, 55), B = makeTeam(2, 'B', gender, 55);
+      A.rotation[0] = { ...A.rotation[0], player: { ...A.rotation[0].player, traits } };
+      const seen = new Set<string>();
+      for (let s = 1; s <= 300; s++) {
+        const r = simulateRally({ gender, teams: { A, B }, serving: 'A', seed: s });
+        const toss = r.events.find(e => e.type === 'action' && e.action === 'toss');
+        if (toss && toss.type === 'action' && toss.info?.serveType) seen.add(toss.info.serveType);
+      }
+      return seen;
+    };
+    expect([...typesOf([])]).toEqual(['float']);
+    expect(typesOf(['jumpFloat']).has('spike')).toBe(false);
+    expect(typesOf(['jumpFloat']).has('jumpFloat')).toBe(true);
+    const both = typesOf(['spikeServe', 'jumpFloat']);
+    expect(both.has('float') || both.has('jumpFloat')).toBe(true);
   });
 });
 
