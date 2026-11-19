@@ -194,7 +194,9 @@ export const SET = {
   maxOffset: { quick: 1.0, timeDiff: 0.8, fast: 2.0, high: 99 } as Record<SetType, number>,
   /** トスのずれ（m）＝|N|×base×(1+offset×offsetK+spin×spinK)×(skillPivot - 技量/100) */
   errBase: 0.28,
-  errOffsetK: 0.35,
+  errOffsetK: 0.9,
+  /** パスがネットから離れた距離1mあたり、打つ位置がネットから離れる量（m） */
+  offNetCarry: 0.4,
   errSpinK: 0.8,
   skillPivot: 1.6,
   /** セッター以外が上げる時の技量の掛け率 */
@@ -240,6 +242,8 @@ export const ATTACK = {
   softErrRatio: 0.4,
   /** ダイレクトはトスに合わせて打つより難しい分の罰 */
   directPenalty: 6,
+  /** 守る側が打球を読みにくい分の遅れ（秒）。トスが速いほど構え直す時間がない（オープンは0） */
+  readDelay: { quick: 0.17, timeDiff: 0.14, fast: 0.12, high: 0 } as Record<SetType, number>,
   /** 軟打・フェイントを選ぶ確率 */
   softBase: 0.08,
   softBadSet: 0.3,

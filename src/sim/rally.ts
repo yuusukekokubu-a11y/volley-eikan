@@ -40,6 +40,8 @@ type IncomingKind = 'serve' | 'spike' | 'tip' | 'oneTouch' | 'freeball' | 'overp
 interface Incoming {
   team: TeamId;
   kind: IncomingKind;
+  /** 打球を読みにくい分の遅れ（秒）。速い攻撃ほど、守る側は打つ前に構え直す時間がない */
+  readDelay?: number;
   land: Local;
   tArrive: number;
   flight: number;
@@ -653,10 +655,10 @@ class RallySim {
 
     let best: { c: CourtPlayer; margin: number; d: number; reach: number } | undefined;
     for (const c of cands) {
-      // ブロックに当たって自分のコートに戻ったボールは、フォローに寄っている途中の位置から追う
-      const from = inc.kind === 'blockBack' ? this.posAt(c, inc.tArrive - inc.flight) : this.pos.get(c.p.id)!;
+      // ボールが飛んできた時に、記録の上でいる位置（守備の位置へ動いている途中ならその途中）から追う
+      const from = this.posAt(c, inc.tArrive - inc.flight);
       const d = dist(from, inc.land);
-      const reach = this.reachDist(c, this.timeToReact(c, inc.tArrive, inc.flight));
+      const reach = this.reachDist(c, Math.max(0, this.timeToReact(c, inc.tArrive, inc.flight) - (inc.readDelay ?? 0)));
       // セッターは2本目のために、なるべく1本目を触らない
       const margin = reach - d - (c.role === 'S' && inc.kind !== 'serve' ? 0.8 : 0);
       if (!best || margin > best.margin) best = { c, margin, d, reach };
@@ -832,7 +834,7 @@ class RallySim {
       const unready = (1 - pl.q) + pl.late * 3;
       return {
         item: o,
-        w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter)))
+        w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter, bu.t)))
           * Math.exp(-SET.readyK * judge * unready),
       };
     }));
@@ -863,7 +865,8 @@ class RallySim {
     const setType = choice.type;
     const ang = this.rng.range(0, Math.PI * 2);
     const hit: Local = {
-      u: clamp(HIT_U + Math.abs(Math.cos(ang)) * setError, 0.25, 3.5),
+      // 崩れた所（ネットから遠い所）から上げたトスは、打つ位置もネットから離れる
+      u: clamp(HIT_U + Math.abs(Math.cos(ang)) * setError + Math.max(0, bu.at.u - SET_TARGET.u) * SET.offNetCarry, 0.25, 4.5),
       v: clamp(choice.lane + Math.sin(ang) * setError, -4.6, 4.6),
     };
     const flight = TIMING.setFlight[setType] + (useSetter ? 0 : TIMING.secondarySetExtra);
@@ -1079,11 +1082,11 @@ class RallySim {
 
     // フェイント・軟打：ブロックの上を越えて手前に落とす
     if (soft) {
-      const land = this.aim(opp, ATTACK.tipTargetU, TIMING.tipFlight, tech, blockers);
+      const land = this.aim(opp, ATTACK.tipTargetU, TIMING.tipFlight, tech, blockers, sb.tHit);
       return {
         kind: 'incoming',
         inc: {
-          team: opp, kind: 'tip', land, tArrive: sb.tHit + TIMING.tipFlight, flight: TIMING.tipFlight,
+          team: opp, kind: 'tip', land, tArrive: sb.tHit + TIMING.tipFlight, flight: TIMING.tipFlight, readDelay: this.readDelay(sb),
           pressure: power, shake: 0, apex: Math.max(hitZ, (maxReach || netCm) / 100) + 0.35,
           ballKind: 'tip', dropReason: 'tipKill', dropKey: a.p.id, sender: a,
         },
@@ -1139,14 +1142,14 @@ class RallySim {
     const speed = TIMING.spikeSpeedBase + this.phys(a, 'power', sc) * TIMING.spikeSpeedPerPower;
     const range: [number, number] = [Math.max(ATTACK.hardTargetU[0], minLand), ATTACK.hardTargetU[1]];
     const roughFlight = (sb.hit.u + (range[0] + range[1]) / 2) / speed;
-    const land = this.aim(opp, range, roughFlight, tech, blockers);
+    const land = this.aim(opp, range, roughFlight, tech, blockers, sb.tHit);
     const dx = sb.hit.u + land.u;
     const dy = (-land.v) - sb.hit.v;
     const flight = Math.hypot(dx, dy, hitZ) / speed;
     return {
       kind: 'incoming',
       inc: {
-        team: opp, kind: 'spike', land, tArrive: sb.tHit + flight, flight, pressure: power, shake: 0,
+        team: opp, kind: 'spike', land, tArrive: sb.tHit + flight, flight, pressure: power, shake: 0, readDelay: this.readDelay(sb),
         ballKind: 'spike', dropReason: 'kill', dropKey: a.p.id, sender: a,
       },
     };
@@ -1160,13 +1163,15 @@ class RallySim {
     const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
     const sc: Scene[] = quick ? ['blockQuick'] : [];
     const front = [...this.frontSlots(def).keys()].filter(c => c.role !== 'L');
-    front.sort((x, y) => Math.abs(this.pos.get(x.p.id)!.v - laneDef) - Math.abs(this.pos.get(y.p.id)!.v - laneDef));
+    // トスが上がった時に記録の上でいる位置（ブロックの基本位置へ動いている途中ならその途中）から判定する
+    const at = (c: CourtPlayer) => this.posAt(c, sb.tSet);
+    front.sort((x, y) => Math.abs(at(x).v - laneDef) - Math.abs(at(y).v - laneDef));
     const res: Blocker[] = [];
     const tQuick = sb.tSet + TIMING.setFlight.quick;
     const usedSides = new Set<number>();
     front.forEach(c => {
       if (res.length >= BLOCK.maxBlockers) return;
-      const p = this.pos.get(c.p.id)!;
+      const p = at(c);
       // 1人目はレーンの正面、2人目以降は自分のいる側の隣（埋まっていれば反対側）
       let spotV = laneDef;
       if (res.length > 0) {
@@ -1209,13 +1214,13 @@ class RallySim {
   }
 
   /** 配球の判断用：その攻撃に相手ブロックが何枚つきそうか（乱数を使わない見積もり） */
-  private expectedBlockers(def: TeamId, lane: number, type: SetType, secondary: boolean): number {
+  private expectedBlockers(def: TeamId, lane: number, type: SetType, secondary: boolean, tSet: number): number {
     const laneDef = -lane;
     const tAvail = TIMING.setFlight[type] + (secondary ? TIMING.secondarySetExtra : 0) + BLOCK.readExtra;
     let n = 0;
     for (const c of this.court[def]) {
       if (!c.front || c.role === 'L') continue;
-      const p = this.pos.get(c.p.id)!;
+      const p = this.posAt(c, tSet);
       const tNeed = readReaction(this.blockSkill(c, ['blockRead'])) + Math.abs(laneDef - p.v) / sideSpeed(this.eff(c, 'speed')) + TIMING.blockRise;
       if (tNeed - tAvail <= BLOCK.lateLimit * 0.5) n++;
     }
@@ -1258,15 +1263,20 @@ class RallySim {
     };
   }
 
+  /** 守る側が打球を読みにくい分の遅れ：トスが速いほど、打つ前に構え直す時間がない */
+  private readDelay(sb: SetBall): number {
+    return sb.direct ? ATTACK.readDelay.quick : ATTACK.readDelay[sb.setType];
+  }
+
   /** 狙う場所：テクニックが高いほど候補を多く比べて、守備のいない所を選ぶ */
-  private aim(def: TeamId, uRange: [number, number], flight: number, tech: number, blockers: Blocker[]): Local {
+  private aim(def: TeamId, uRange: [number, number], flight: number, tech: number, blockers: Blocker[], tHit: number): Local {
     const k = 1 + Math.floor(Math.max(0, tech) / ATTACK.aimTechDiv);
     const jumped = new Set(blockers.map(b => b.cp.p.id));
     const diggers = this.court[def].filter(c => !jumped.has(c.p.id));
     let best: { l: Local; s: number } | undefined;
     for (let i = 0; i < k; i++) {
       const l: Local = { u: this.rng.range(uRange[0], uRange[1]), v: this.rng.range(ATTACK.targetV[0], ATTACK.targetV[1]) };
-      const s = Math.min(...diggers.map(c => dist(this.pos.get(c.p.id)!, l) - this.reachDist(c, flight)));
+      const s = Math.min(...diggers.map(c => dist(this.posAt(c, tHit), l) - this.reachDist(c, flight)));
       if (!best || s > best.s) best = { l, s };
     }
     // 狙いどおりには飛ばない
