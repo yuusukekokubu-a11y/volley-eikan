@@ -38,6 +38,8 @@ export interface SetOptions {
   setNumber?: number;
   /** 自チームの監督が持っている監督特能（なければ基本効果だけ） */
   managerSkills?: string[];
+  /** 前のセットから持ち越す疲れ */
+  fatigue?: Record<string, number>;
 }
 
 interface ActiveBuff { team: TeamId; effects: StatEffect[]; left: number; name: string }
@@ -86,6 +88,7 @@ export class SetGame {
     this.serving = o.serving;
     this.seed = o.seed;
     this.managerSkills = o.managerSkills ?? [];
+    this.fatigue = { ...(o.fatigue ?? {}) };
     this.starters = {
       A: new Set(o.teams.A.rotation.map(s => s.player.id)),
       B: new Set(o.teams.B.rotation.map(s => s.player.id)),
