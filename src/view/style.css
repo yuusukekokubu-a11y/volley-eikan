@@ -91,3 +91,19 @@ table.roster .tired { color: #ff9d7a; font-size: 12px; }
 #stopRight button.pick.on { background: #2f63c9; }
 .picklist { display: flex; flex-wrap: wrap; }
 .hint { font-size: 12px; opacity: 0.75; margin: 4px 0; }
+
+/* ---------- 試合前・セット間（先発と並び・方針） ---------- */
+.rot.pickable { gap: 4px; }
+.rot button.zone, .librow button.zone {
+  min-height: 46px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.12);
+  color: var(--text); font-size: 14px; font-weight: 700; line-height: 1.15; padding: 2px 0;
+}
+.rot button.zone.on, .librow button.zone.on { background: #2f63c9; }
+.librow { display: flex; gap: 4px; margin-top: 4px; }
+.librow button.zone { flex: 1; }
+.trow { margin: 2px 0; }
+#stopLeft .pick { min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: rgba(255,255,255,0.12); color: #fff; font-size: 14px; font-weight: 700; margin: 3px; }
+#stopLeft .pick.on { background: #2f63c9; }
+.trow, .brow { display: flex; align-items: center; flex-wrap: wrap; margin: 1px 0; }
+.trow .label, .brow .label { width: 4.5em; font-size: 13px; opacity: 0.85; }
+.trow button.pick, .brow button.pick { min-height: 42px !important; font-size: 14px !important; }

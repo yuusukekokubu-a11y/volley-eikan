@@ -31,10 +31,22 @@ export function placeShadow(shadow: THREE.Mesh, pl: PlayerFrame, size = 1) {
   shadow.scale.set(s, s, s);
 }
 
+/**
+ * 記録の座標（コートの座標）を obj の座標に直す。選手とボールはコートチェンジで回す入れ物（userData.court）に
+ * 入っているので、その入れ物の座標として世界座標に直してから obj の座標にする
+ */
+function courtToLocal(obj: THREE.Object3D, p: { x: number; y: number; z: number }): THREE.Vector3 {
+  const w = v3(p.x, p.y, p.z);
+  let c: THREE.Object3D | null = obj;
+  while (c && !c.userData.court) c = c.parent;
+  if (c) c.localToWorld(w);
+  return obj.worldToLocal(w);
+}
+
 /** 頭がボールを目で追う（head は upper の子） */
 export function trackHead(upper: THREE.Object3D, head: THREE.Object3D, fr: Frame) {
   if (!fr.ballVisible) return;
-  const b = upper.worldToLocal(v3(fr.ball.x, fr.ball.y, fr.ball.z));
+  const b = courtToLocal(upper, fr.ball);
   const d = b.sub(head.position);
   const yaw = clampN(Math.atan2(-d.z, d.x), -1.1, 1.1);
   const pitch = clampN(Math.atan2(d.y, Math.hypot(d.x, d.z)), -0.7, 0.9);
@@ -46,7 +58,7 @@ export function trackHead(upper: THREE.Object3D, head: THREE.Object3D, fr: Frame
  * side は左右の手の間隔（upper の z 方向）。
  */
 export function handGoal(upper: THREE.Object3D, contact: { x: number; y: number; z: number }, from: THREE.Vector3, side: number): THREE.Vector3 {
-  const g = upper.worldToLocal(v3(contact.x, contact.y, contact.z));
+  const g = courtToLocal(upper, contact);
   g.z += side;
   const back = from.clone().sub(g);
   const len = back.length();

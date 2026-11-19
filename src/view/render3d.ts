@@ -52,6 +52,8 @@ export class Render3D {
   private ballShadow: THREE.Mesh;
   private net = new THREE.Group();
   private lastT = 0;
+  /** 選手とボールの入れ物。コートチェンジの時はコートの中心で180度回す（記録の座標はそのまま） */
+  private dyn = new THREE.Group();
   private size = { w: 844, h: 390 };
   /** 確認用：追いかける選手と見る角度、ほかの選手を薄くするか */
   private follow: { id: string; view: FollowView; dim: boolean } | null = null;
@@ -72,10 +74,13 @@ export class Render3D {
     this.buildNet();
 
     this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 14), new THREE.MeshLambertMaterial({ map: ballTexture() }));
-    this.scene.add(this.ball);
+    this.dyn.add(this.ball);
     this.ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.16, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 }));
     this.ballShadow.rotation.x = -Math.PI / 2;
-    this.scene.add(this.ballShadow);
+    this.dyn.add(this.ballShadow);
+    // 選手とボールはまとめて動かす入れ物に入れる（コートチェンジで180度回す）
+    this.dyn.userData.court = true;
+    this.scene.add(this.dyn);
 
     this.camera.position.copy(TV_CAMERA);
     this.camera.lookAt(TV_LOOK);
@@ -118,7 +123,7 @@ export class Render3D {
       if (!v) {
         v = { motion: new Motion(pl), fig: this.makeFigure(pl) };
         this.players.set(pl.id, v);
-        this.scene.add(v.fig.root, v.fig.shadow);
+        this.dyn.add(v.fig.root, v.fig.shadow);
         setDim(v.fig, !!this.follow?.dim && this.follow.id !== pl.id);
       }
       const ms = v.motion.update(pl, snap ? 0 : dt, fr);
@@ -126,7 +131,7 @@ export class Render3D {
     }
     for (const [id, v] of this.players) {
       if (!seen.has(id)) {
-        this.scene.remove(v.fig.root, v.fig.shadow);
+        this.dyn.remove(v.fig.root, v.fig.shadow);
         this.players.delete(id);
       }
     }
@@ -138,6 +143,11 @@ export class Render3D {
     this.ballShadow.scale.set(s, s, s);
     if (this.follow) this.followCamera(fr, snap ? 0 : dt);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** コートチェンジ：自チーム（赤）を右側のコートに見せる */
+  setSwapped(on: boolean) {
+    this.dyn.rotation.y = on ? Math.PI : 0;
   }
 
   /**
@@ -155,12 +165,14 @@ export class Render3D {
     const f = this.follow!;
     const pl = fr.players.find(p => p.id === f.id);
     if (!pl) return;
-    const forward = pl.team === 'A' ? 1 : -1; // 相手コートの方向（x）
+    // コートチェンジで回している分を、カメラの位置にも反映する
+    const k0 = this.dyn.rotation.y !== 0 ? -1 : 1;
+    const forward = (pl.team === 'A' ? 1 : -1) * k0; // 相手コートの方向（x）
     const off = f.view === 'side' ? v3(0, -FOLLOW_DIST, 1.6)
       : f.view === 'back' ? v3(-forward * FOLLOW_DIST * 0.9, -1.8, 2.0)
       : v3(forward * FOLLOW_DIST * 0.9, -1.8, 2.0);
     // 下の操作ボタンに足元が隠れないよう、見る点を低めにして選手を画面の上寄りに映す
-    const look = v3(pl.x, pl.y, pl.z + 0.45);
+    const look = v3(pl.x * k0, pl.y * k0, pl.z + 0.45);
     const want = look.clone().add(off);
     const k = dt <= 0 ? 1 : 1 - Math.exp(-6 * dt);
     this.camera.position.lerp(want, k);
@@ -171,7 +183,7 @@ export class Render3D {
 
   /** 選手が入れ替わった時（新しいラリー）に古い人形を消す */
   reset() {
-    for (const v of this.players.values()) this.scene.remove(v.fig.root, v.fig.shadow);
+    for (const v of this.players.values()) this.dyn.remove(v.fig.root, v.fig.shadow);
     this.players.clear();
     this.lastT = 0;
   }
