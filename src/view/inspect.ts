@@ -4,7 +4,8 @@
 
 import { simulateRally } from '../sim/rally';
 import { makeTeam, rotate } from '../sim/sample';
-import type { ActionType, Gender, RallyEvent, RallyRecord, TeamId, TeamState } from '../sim/types';
+import { defaultHolders, TRAITS } from '../sim/traits';
+import type { ActionType, Gender, Player, RallyEvent, RallyRecord, Role, TeamId, TeamState } from '../sim/types';
 import { Playback } from './playback';
 import { Render3D, type FollowView } from './render3d';
 
@@ -51,8 +52,19 @@ let focus: string | null = null;
 /** 直前に見つけた動作（同じボタンをもう一度押したら、これより後から探す） */
 let lastFound: { seed: number; t: number } | null = null;
 
+/** 確認用：赤チームの、その特能が効く位置の選手に持たせる特能 */
+let trait: string | null = params.get('trait');
+
+function withTrait(t: TeamState): TeamState {
+  const d = trait ? TRAITS[trait] : undefined;
+  if (!d) return t;
+  const roles = defaultHolders(d);
+  const give = (p: Player, role: Role): Player => (roles.includes(role) && !p.traits.includes(d.id) ? { ...p, traits: [...p.traits, d.id] } : p);
+  return { ...t, rotation: t.rotation.map(x => ({ ...x, player: give(x.player, x.role) })), libero: t.libero ? give(t.libero, 'L') : t.libero };
+}
+
 function teams(s: number): Record<TeamId, TeamState> {
-  let A = makeTeam(1, 'A', gender, 55), B = makeTeam(2, 'B', gender, 55);
+  let A = withTrait(makeTeam(1, 'A', gender, 55)), B = makeTeam(2, 'B', gender, 55);
   for (let i = 0; i < s % 6; i++) A = rotate(A);
   for (let i = 0; i < (s >> 3) % 6; i++) B = rotate(B);
   return { A, B };
@@ -220,6 +232,30 @@ $('gender').onclick = () => {
   t = Number((e.target as HTMLInputElement).value);
 };
 window.addEventListener('resize', () => r3.resize(window.innerWidth, window.innerHeight));
+
+function traitLabel() {
+  $('traitBtn').textContent = `特能：${trait ? TRAITS[trait]?.name ?? 'なし' : 'なし'}`;
+}
+function buildTraits() {
+  const box = $('traitList');
+  box.innerHTML = '';
+  for (const d of Object.values(TRAITS)) {
+    const b = document.createElement('button');
+    const color = d.kind === 'style' ? 'green' : d.kind === 'unlock' ? 'blue' : d.color;
+    b.className = `${color}${trait === d.id ? ' on' : ''}`;
+    b.textContent = d.name;
+    b.onclick = () => {
+      trait = trait === d.id ? null : d.id;
+      traitLabel();
+      buildTraits();
+      load(seed, true);
+    };
+    box.appendChild(b);
+  }
+}
+$('traitBtn').onclick = () => { buildTraits(); $('traitPanel').classList.remove('hidden'); };
+$('traitClose').onclick = () => $('traitPanel').classList.add('hidden');
+traitLabel();
 
 $('gender').textContent = gender === 'male' ? '男子' : '女子';
 $('speed').textContent = `×${SPEEDS[speedIdx]}`;

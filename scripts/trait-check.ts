@@ -5,40 +5,17 @@
 // ラリーの乱数の並びがずれる分のばらつきがあるので、種の組を K 回変えて平均し、ばらつきの目安（±）も出す。
 //   npx tsx scripts/trait-check.ts [1回のラリー数] [male|female|both] [特能IDをカンマ区切り] [K]
 
+import { SetGame } from '../src/sim/match';
 import { simulateRally } from '../src/sim/rally';
 import { Rng } from '../src/sim/rng';
-import { makeTeam, rotate } from '../src/sim/sample';
-import { TRAITS, type Scene, type TraitDef } from '../src/sim/traits';
+import { makeBench, makeTeam, rotate } from '../src/sim/sample';
+import { defaultHolders as holders, TRAITS, type TraitDef } from '../src/sim/traits';
 import type { Gender, Player, Role, TeamState } from '../src/sim/types';
 
 const N = Number(process.argv[2] || 6000);
 const genders: Gender[] = process.argv[3] === 'male' ? ['male'] : process.argv[3] === 'female' ? ['female'] : ['male', 'female'];
 const only = process.argv[4] && process.argv[4] !== 'all' ? process.argv[4].split(',') : undefined;
 const K = Number(process.argv[5] || 4);
-
-/** 特能を持たせる位置：ポジション専用ならその位置。ほかは効く場面から決める */
-function holders(d: TraitDef): Role[] {
-  if (d.roles) return d.roles;
-  if (d.kind === 'style') {
-    const a = d.axis;
-    if (a.startsWith('serve')) return ['S', 'OH', 'MB', 'OP'];
-    if (a === 'course' || a === 'hitting') return ['OH', 'OP', 'MB'];
-    if (a === 'blocking') return ['MB', 'OH', 'OP'];
-    if (a === 'defense' || a === 'receiving') return ['OH', 'L'];
-    return ['S'];
-  }
-  if (d.kind === 'unlock') return d.unlocks === 'jumpFloat' || d.unlocks === 'spikeServe' ? ['S', 'OH', 'MB', 'OP'] : ['OH', 'OP'];
-  const scenes = new Set<Scene>(d.effects.map(e => e.scene));
-  const has = (...xs: Scene[]) => xs.some(x => scenes.has(x));
-  if (has('serve', 'serveAim', 'serveChoice', 'serveFloat', 'serveJumpFloat', 'serveSpike', 'serveStreak', 'pinchServe')) return ['S', 'OH', 'MB', 'OP'];
-  if (has('serveReceive', 'receiveFloat', 'receiveHard', 'dig', 'digTip', 'dive', 'freeball', 'blockFollow')) return ['OH', 'L'];
-  if (has('set', 'setChoice', 'setBadPass', 'setSpin', 'setQuick', 'setBack')) return ['S'];
-  if (has('setSecondary')) return ['OH', 'OP', 'L'];
-  if (has('block', 'blockRead', 'blockQuick', 'blockTouch', 'blockKill', 'blockOutGuard')) return ['MB', 'OH', 'OP'];
-  if (has('attack', 'attackBadSet', 'attackQuick', 'attackSecondary', 'attackRepeat', 'attackStraight', 'attackCross',
-    'attackTimeDiff', 'blockOut', 'tip', 'direct', 'cover')) return ['OH', 'OP', 'MB'];
-  return ['S', 'OH', 'MB', 'OP', 'L']; // 全般
-}
 
 function withTrait(t: TeamState, id: string | null, roles: Role[]): TeamState {
   const give = (p: Player, role: Role): Player => (id && roles.includes(role) && !p.traits.includes(id) ? { ...p, traits: [...p.traits, id] } : p);
@@ -70,12 +47,33 @@ function pointRate(g: Gender, id: string | null, roles: Role[], seedOffset = 0):
     const score = { A: (s * 7) % 25, B: (s * 13) % 25 };
     const r = simulateRally({
       gender: g, teams: { A: a, B: b }, serving: s % 2 ? 'A' : 'B', seed: s + seedOffset,
-      context: { setNumber: 1, isFinalSet: false, score, serveStreak: s % 5 },
+      // 途中から入った選手：ピンチサーバーの場面を試すため、自チームの全員を途中から入ったことにする
+      context: { setNumber: 1, isFinalSet: false, score, serveStreak: s % 5, subbedIn: [...a.rotation.map(x => x.player.id)] },
     });
     if (r.winner === 'A') won++;
   }
   return won / N;
 }
+
+/**
+ * 1セットを通して効くもの（エースの風格、全力・サボり屋の疲れ）は、セットを回して点の割合を比べる。
+ * ラリーの数は pointRate と同じくらいにする
+ */
+function setPointRate(g: Gender, id: string | null, roles: Role[], seedOffset = 0): number {
+  let won = 0, all = 0;
+  for (let s = 1; all < N; s++) {
+    const A = withTrait(makeTeam(21, 'A', g, 55), id, roles), B = makeTeam(22, 'B', g, 55);
+    const game = new SetGame({
+      gender: g, seed: s + seedOffset, serving: s % 2 ? 'A' : 'B', teams: { A, B },
+      bench: { A: makeBench(21, 'A', g, 55), B: makeBench(22, 'B', g, 55) },
+    });
+    while (!game.over) game.next();
+    won += game.score.A;
+    all += game.score.A + game.score.B;
+  }
+  return won / all;
+}
+const setLevel = (d: TraitDef) => d.kind === 'stat' && (!!d.special || !!d.extra?.fatigueMul);
 
 /** 1点を取る確率 p から、25点・2点差のセットを取る確率 */
 function setWin(p: number): number {
@@ -92,6 +90,7 @@ function setWin(p: number): number {
 }
 
 function stageOf(d: TraitDef): string {
+  if (d.kind === 'stat' && d.special) return '独自';
   if (d.kind === 'stat') {
     const m = Math.max(...d.effects.map(e => Math.abs(e.delta)));
     const pos = d.effects.some(e => e.delta > 0), neg = d.effects.some(e => e.delta < 0);
@@ -101,6 +100,7 @@ function stageOf(d: TraitDef): string {
 }
 
 const KIND: Record<string, string> = { stat: '補正', style: '緑', unlock: '解禁' };
+const kindOf = (d: TraitDef) => (d.kind === 'stat' && d.color === 'gold' ? '金' : setLevel(d) ? '補正（セット通し）' : KIND[d.kind]);
 const pct = (x: number) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}`;
 
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
@@ -110,13 +110,19 @@ for (const g of genders) {
   const offs = Array.from({ length: K }, (_, i) => i * 100000);
   const bases = offs.map(o => pointRate(g, null, [], o));
   const base = mean(bases);
+  let setBases: number[] | undefined;
   const rows: { d: TraitDef; diff: number; err: number; set: number; stage: string; roles: Role[] }[] = [];
   for (const d of Object.values(TRAITS)) {
     if (only && !only.includes(d.id)) continue;
     const roles = holders(d);
-    const diffs = offs.map((o, i) => pointRate(g, d.id, roles, o) - bases[i]);
+    let diffs: number[];
+    if (setLevel(d)) {
+      setBases ??= offs.map(o => setPointRate(g, null, [], o));
+      diffs = offs.map((o, i) => setPointRate(g, d.id, roles, o) - setBases![i]);
+    } else diffs = offs.map((o, i) => pointRate(g, d.id, roles, o) - bases[i]);
     const diff = mean(diffs);
-    rows.push({ d, diff, err: (2 * sd(diffs)) / Math.sqrt(K), set: setWin(base + diff) - setWin(base), stage: stageOf(d), roles });
+    const b0 = setLevel(d) ? mean(setBases!) : base;
+    rows.push({ d, diff, err: (2 * sd(diffs)) / Math.sqrt(K), set: setWin(b0 + diff) - setWin(b0), stage: stageOf(d), roles });
   }
   const noise = mean(rows.map(r => r.err));
   console.log(`\n== ${g === 'male' ? '男子' : '女子'}（${N}ラリー×${K}組、基準の得点率 ${(base * 100).toFixed(1)}%、ばらつきの目安 ±${(noise * 100).toFixed(1)}点）`);
@@ -134,6 +140,6 @@ for (const g of genders) {
     if (Math.abs(r.diff) < Math.max(r.err, 0.002)) mark = '効きが見えない';
     else if (sign && Math.sign(r.diff) !== sign) mark = '向きが逆';
     else if (m > 0 && Math.abs(r.diff) > m * 2.5 && Math.abs(r.diff) > 0.01) mark = '極端に大きい';
-    console.log(`${r.d.name}｜${KIND[r.d.kind]}｜${r.stage}｜${r.roles.join('・')}｜${pct(r.diff)}点（±${(r.err * 100).toFixed(1)}）｜${pct(r.set)}%｜${mark}`);
+    console.log(`${r.d.name}｜${kindOf(r.d)}｜${r.stage}｜${r.roles.join('・')}｜${pct(r.diff)}点（±${(r.err * 100).toFixed(1)}）｜${pct(r.set)}%｜${mark}`);
   }
 }

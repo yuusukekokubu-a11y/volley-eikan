@@ -2,10 +2,10 @@
 // 得点・サーブ権・ローテーション・セットの終わり、停止（定期・連続失点）、タイムアウト、選手交代、疲れを扱う。
 // 停止・タイムアウト・交代は自チーム（A）だけ。相手チーム（B）の采配は未決事項。
 
-import { FATIGUE, MATCH } from './constants';
+import { ACE_AURA, FATIGUE, MATCH } from './constants';
 import { MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
 import { simulateRally } from './rally';
-import { traitExtra, type StatEffect } from './traits';
+import { hasTrait, traitExtra, type StatEffect } from './traits';
 import type { Gender, Player, RallyRecord, Role, Tactics, TeamId, TeamState } from './types';
 
 export const OWN: TeamId = 'A';
@@ -45,6 +45,9 @@ export interface SetOptions {
 interface ActiveBuff { team: TeamId; effects: StatEffect[]; left: number; name: string }
 
 const other = (t: TeamId): TeamId => (t === 'A' ? 'B' : 'A');
+
+/** 自分で決めた得点（スパイク・フェイント・ブロックアウト・ブロック・サービスエース） */
+const SCORING = new Set<string>(['kill', 'tipKill', 'blockOut', 'blockKill', 'ace']);
 
 /** ローテーションを1つ回す（ゾーン2の選手がゾーン1へ） */
 export function rotateTeam(team: TeamState): TeamState {
@@ -183,6 +186,18 @@ export class SetGame {
     // タイムアウトの効果は決まったラリー数で切れる
     for (const b of this.buffs) b.left--;
     this.buffs = this.buffs.filter(b => b.left > 0);
+    // 金特「エースの風格」：持ち主が決めると、チーム全体に小さな上乗せ（かかっていれば掛け直す）
+    const scorer = rec.keyPlayerId;
+    if (scorer && SCORING.has(rec.reason)) {
+      const team = this.teams[w];
+      const p = [...team.rotation.map(x => x.player), ...(team.libero ? [team.libero] : [])].find(x => x.id === scorer);
+      if (p && hasTrait(p, 'aceAura')) {
+        this.buffs = this.buffs.filter(b => !(b.team === w && b.name === 'エースの風格'));
+        const effects: StatEffect[] = (['jump', 'power', 'speed', 'technique', 'block'] as const)
+          .map(ability => ({ scene: 'all' as const, ability, delta: ACE_AURA.delta }));
+        this.buffs.push({ team: w, effects, left: ACE_AURA.rallies, name: 'エースの風格' });
+      }
+    }
     // セットの終わり
     if (this.score[w] >= this.target && this.score[w] - this.score[l] >= MATCH.winBy) this.winner = w;
     if (this.finalSet && !this.courtChanged && Math.max(this.score.A, this.score.B) >= MATCH.finalCourtChange) this.courtChanged = true;

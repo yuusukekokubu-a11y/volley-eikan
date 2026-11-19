@@ -107,6 +107,8 @@ export interface StatTrait {
     /** スパイクミスのうち、アウト／ネットに寄せる（アウト多め・ネットにかける） */
     attackMissSide?: 'out' | 'net';
   };
+  /** 能力の上下で表せない独自の効果（金特のエースの風格） */
+  special?: 'aceAura';
   /** 説明（数字は出さず、言葉で表す） */
   desc?: string;
 }
@@ -285,8 +287,18 @@ const LIST: TraitDef[] = [
   style('aceSetter', 'エース頼み', 'setting', 'ace', ['S']),
   style('spreadSetter', '散らし好き', 'setting', 'spread', ['S']),
 
-  // ================= 金 =================
+  // ================= 金（元の青から1段上。元の青と置き換わる） =================
+  gold('magicBall', '魔球', 'jumpFloatPro', each('serveJumpFloat', ['technique'], 15), { alsoUnlocks: 'jumpFloat' }),
+  gold('cannonServe', '大砲サーブ', 'spikeServePro', each('serveSpike', ['power'], 15), { alsoUnlocks: 'spikeServe' }),
+  gold('ironWall', '鉄壁', 'killBlock', each('blockKill', ['block'], 15)),
+  gold('readAll', '読み切り', 'courseRead', each('blockRead', ['block'], 15)),
+  gold('guardian', '守護神', 'digger', each('dig', ['technique'], 15)),
   gold('perfectCut', '完璧カット', 'receiveMaster', each('serveReceive', ['technique'], 15)),
+  gold('commander', '司令塔', 'setEye', each('setChoice', ['technique'], 15), { roles: ['S'] }),
+  gold('godSpeed', '神速', 'quickHit', each('attackQuick', ['speed', 'technique'], 10), { roles: ['MB'] }),
+  gold('showman', '千両役者', 'clutch', each('clutch', ALL5, 10)),
+  // 独自：自分が決めると、チーム全体に小さな上乗せ（数ラリーで切れる。試合の側で扱う）
+  gold('aceAura', 'エースの風格', undefined, [], { special: 'aceAura' }),
 ];
 
 export const TRAITS: Record<string, TraitDef> = Object.fromEntries(LIST.map(d => [d.id, d]));
@@ -316,7 +328,7 @@ export function styleOf<A extends StyleAxis>(p: Player, axis: A): StyleAxes[A] |
 export function validateTrait(def: TraitDef): string[] {
   const errs: string[] = [];
   if (def.kind === 'stat') {
-    if (!def.effects.length) errs.push(`${def.id}: 効果がない`);
+    if (!def.effects.length && !def.special) errs.push(`${def.id}: 効果がない`);
     for (const e of def.effects) {
       if (!TRAIT_STAGES.includes(Math.abs(e.delta) as Stage)) errs.push(`${def.id}: 段階 ${e.delta} は使えない`);
       // 赤はマイナスが主。ムラっ気のように好調の時だけ上がるもの（マイナスも持つ）と、相手に効くもの（配球バレ）は例外
@@ -357,6 +369,33 @@ export function traitDelta(
   if (row) for (const m of row.teammates) if (m.p !== p) add(m.p, m.front);
   if (facing) add(facing, undefined, true);
   return sum;
+}
+
+/**
+ * その特能が効く位置（確認用の一覧と確認用の画面で、誰に持たせるかに使う）。
+ * ポジション専用ならその位置。ほかは効く場面から決める
+ */
+export function defaultHolders(d: TraitDef): Role[] {
+  if (d.roles) return d.roles;
+  if (d.kind === 'style') {
+    const a = d.axis;
+    if (a.startsWith('serve')) return ['S', 'OH', 'MB', 'OP'];
+    if (a === 'course' || a === 'hitting') return ['OH', 'OP', 'MB'];
+    if (a === 'blocking') return ['MB', 'OH', 'OP'];
+    if (a === 'defense' || a === 'receiving') return ['OH', 'L'];
+    return ['S'];
+  }
+  if (d.kind === 'unlock') return d.unlocks === 'jumpFloat' || d.unlocks === 'spikeServe' ? ['S', 'OH', 'MB', 'OP'] : ['OH', 'OP'];
+  const scenes = new Set<Scene>(d.effects.map(e => e.scene));
+  const has = (...xs: Scene[]) => xs.some(x => scenes.has(x));
+  if (has('serve', 'serveAim', 'serveChoice', 'serveFloat', 'serveJumpFloat', 'serveSpike', 'serveStreak', 'pinchServe')) return ['S', 'OH', 'MB', 'OP'];
+  if (has('serveReceive', 'receiveFloat', 'receiveHard', 'dig', 'digTip', 'dive', 'freeball', 'blockFollow')) return ['OH', 'L'];
+  if (has('set', 'setChoice', 'setBadPass', 'setSpin', 'setQuick', 'setBack')) return ['S'];
+  if (has('setSecondary')) return ['OH', 'OP', 'L'];
+  if (has('block', 'blockRead', 'blockQuick', 'blockTouch', 'blockKill', 'blockOutGuard')) return ['MB', 'OH', 'OP'];
+  if (has('attack', 'attackBadSet', 'attackQuick', 'attackSecondary', 'attackRepeat', 'attackStraight', 'attackCross',
+    'attackTimeDiff', 'blockOut', 'tip', 'direct', 'cover')) return ['OH', 'OP', 'MB'];
+  return ['S', 'OH', 'MB', 'OP', 'L']; // 全般
 }
 
 /** 5段階で表せない効き（extra）を選手の特能から集める */

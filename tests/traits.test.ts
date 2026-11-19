@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { simulateRally } from '../src/sim/rally';
-import { makeTeam } from '../src/sim/sample';
-import { TRAITS, traitDelta, validateTrait, type Scene, type StatTrait } from '../src/sim/traits';
+import { readFileSync } from 'node:fs';
+import { ACE_AURA } from '../src/sim/constants';
+import { SetGame } from '../src/sim/match';
+import { makeBench, makeTeam } from '../src/sim/sample';
+import { canDo, hasTrait, TRAITS, traitDelta, validateTrait, type Scene, type StatTrait } from '../src/sim/traits';
 
 const base = makeTeam(1, 'A', 'male', 55).rotation[0].player;
 
@@ -69,5 +72,53 @@ describe('ダイレクト', () => {
       found = r.events.some(e => e.type === 'action' && e.info?.direct);
     }
     expect(found).toBe(true);
+  });
+});
+
+describe('特能の仕組み', () => {
+  it('金特を持つと、元の青は効かない（置き換わる）', () => {
+    const p = { ...base, traits: ['receiveMaster', 'perfectCut'] };
+    expect(traitDelta(p, 'technique', new Set<Scene>(['all', 'serveReceive']))).toBe(15);
+    expect(hasTrait(p, 'receiveMaster')).toBe(true);
+  });
+
+  it('◎や金のサーブは、◯を持っていなくても打てる', () => {
+    expect(canDo({ ...base, traits: ['jumpFloatPro'] }, 'jumpFloat')).toBe(true);
+    expect(canDo({ ...base, traits: ['cannonServe'] }, 'spikeServe')).toBe(true);
+    expect(canDo({ ...base, traits: [] }, 'spikeServe')).toBe(false);
+  });
+
+  it('相手に効く特能（配球バレ）は、向き合っている相手の能力を上げ、持ち主には効かない', () => {
+    const setter = { ...base, id: 's', traits: ['setTell'] };
+    const blocker = { ...base, id: 'b', traits: [] };
+    const sc = new Set<Scene>(['all', 'block', 'blockRead']);
+    expect(traitDelta(blocker, 'block', sc, undefined, setter)).toBe(10);
+    expect(traitDelta(blocker, 'block', sc)).toBe(0);
+    expect(traitDelta(setter, 'block', sc)).toBe(0);
+  });
+
+  it('登録した特能の場面は、すべて試合の計算で使われている', () => {
+    const src = readFileSync('src/sim/rally.ts', 'utf8');
+    for (const d of Object.values(TRAITS)) {
+      if (d.kind !== 'stat') continue;
+      for (const e of d.effects) {
+        if (e.scene === 'all') continue;
+        expect(src.includes(`'${e.scene}'`), `${d.name} の場面 ${e.scene}`).toBe(true);
+      }
+    }
+  });
+
+  it('エースの風格：持ち主が決めると、チーム全体に数ラリーの上乗せがかかる', () => {
+    const A = makeTeam(1, 'A', 'male', 55), B = makeTeam(2, 'B', 'male', 55);
+    A.rotation = A.rotation.map(s => ({ ...s, player: { ...s.player, traits: [...s.player.traits, 'aceAura'] } }));
+    const g = new SetGame({ gender: 'male', seed: 4, serving: 'A', teams: { A, B }, bench: { A: makeBench(1, 'A', 'male', 55), B: makeBench(2, 'B', 'male', 55) } });
+    let seen = false;
+    for (let i = 0; i < 60 && !g.over && !seen; i++) {
+      const { rec } = g.next();
+      if (rec.winner === 'A' && ['kill', 'tipKill', 'blockOut', 'blockKill', 'ace'].includes(rec.reason)) {
+        seen = g.buffs.some(b => b.team === 'A' && b.name === 'エースの風格' && b.left === ACE_AURA.rallies);
+      }
+    }
+    expect(seen).toBe(true);
   });
 });

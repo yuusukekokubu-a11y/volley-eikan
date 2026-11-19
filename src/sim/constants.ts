@@ -526,3 +526,6 @@ export const SERVE_CHOICE = {
   /** 緑：強気サーブはミスを軽く、安全サーブは重く見る（ミスの見積もりに掛ける） */
   faultWeight: { aggressive: 0.7, safe: 1.4 },
 };
+
+/** 金特「エースの風格」：持ち主が決めると、チーム全体の全能力にこの段階を足す（ラリー数で切れる） */
+export const ACE_AURA = { delta: 1 as const, rallies: 3 };
