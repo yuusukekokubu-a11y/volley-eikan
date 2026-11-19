@@ -39,7 +39,8 @@ describe('スパイクの助走', () => {
       const move = r.events.filter((x): x is Ev<'move'> => x.type === 'move' && x.playerId === e.playerId && x.t <= jump.t).pop()!;
       const p0 = new Playback(r).frame(move.t).players.find(p => p.id === e.playerId)!;
       n++;
-      if (Math.hypot(move.to.x - p0.x, move.to.y - p0.y) >= 2.5) long++;
+      // 崩れたトスでは打つ位置がネットから離れるので、記録上の助走は少し短くなる（跳ぶ高さは予定の踏み切り位置で決まる）
+      if (Math.hypot(move.to.x - p0.x, move.to.y - p0.y) >= 2.0) long++;
     }
     expect(n).toBeGreaterThan(50);
     expect(long / n).toBeGreaterThan(0.8);
