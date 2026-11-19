@@ -10,7 +10,7 @@ import {
   sideSpeed, standingReachCm, type AbilityKey,
 } from './ability';
 import {
-  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
+  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
   MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SET, SET_TARGET, TACTIC_FIT, TIMING,
 } from './constants';
 import { Rng } from './rng';
@@ -115,6 +115,8 @@ class RallySim {
   private netH: number;
   private court: Record<TeamId, CourtPlayer[]> = { A: [], B: [] };
   private pos = new Map<string, Local>();
+  /** 判定に使う「移動の途中の位置」を求めるための、最後の移動（判定上の位置で） */
+  private track = new Map<string, { from: Local; to: Local; t0: number; dur: number }>();
   private busyUntil = new Map<string, number>();
   private events: RallyEvent[] = [];
   private ball: BallSegment[] = [];
@@ -323,8 +325,18 @@ class RallySim {
     // 新しく決まった移動は、それより後に始まる予定だった移動を取り消す（記録の上での予定の上書き）
     this.events = this.events.filter(e => !(e.type === 'move' && e.playerId === c.p.id && e.t > start + 1e-9));
     this.events.push({ type: 'move', t: round(start), playerId: c.p.id, to: this.w2(c.team, shown), dur: round(Math.max(0.12, dur)) });
+    this.track.set(c.p.id, { from: { ...from }, to: { ...to }, t0: start, dur: Math.max(0.12, dur) });
     this.pos.set(c.p.id, { ...to });
     this.load[c.p.id] += d * LOAD.perMeter;
+  }
+
+  /** その時刻に、移動の途中のどこにいるか（判定上の位置）。移動が終わっていれば移動先 */
+  private posAt(c: CourtPlayer, t: number): Local {
+    const m = this.track.get(c.p.id);
+    if (!m || t >= m.t0 + m.dur) return this.pos.get(c.p.id)!;
+    if (t <= m.t0) return m.from;
+    const k = (t - m.t0) / m.dur;
+    return { u: m.from.u + (m.to.u - m.from.u) * k, v: m.from.v + (m.to.v - m.from.v) * k };
   }
 
   /** 世界座標 → チームの自コート基準 */
@@ -573,7 +585,9 @@ class RallySim {
 
     let best: { c: CourtPlayer; margin: number; d: number; reach: number } | undefined;
     for (const c of cands) {
-      const d = dist(this.pos.get(c.p.id)!, inc.land);
+      // ブロックに当たって自分のコートに戻ったボールは、フォローに寄っている途中の位置から追う
+      const from = inc.kind === 'blockBack' ? this.posAt(c, inc.tArrive - inc.flight) : this.pos.get(c.p.id)!;
+      const d = dist(from, inc.land);
       const reach = this.reachDist(c, this.timeToReact(c, inc.tArrive, inc.flight));
       // セッターは2本目のために、なるべく1本目を触らない
       const margin = reach - d - (c.role === 'S' && inc.kind !== 'serve' ? 0.8 : 0);
@@ -787,7 +801,32 @@ class RallySim {
         },
       };
     }
+    this.coverAttack(sb, tosser);
     return { kind: 'set', sb };
+  }
+
+  /**
+   * 味方がスパイクを打つ時、打たない選手がアタッカーの近く（後ろ側の半円）に寄って、ブロックに当たって落ちるボールに備える。
+   * トスを上げた選手はトスの後、おとりの前衛は打つ時刻まで助走してから、ほかは読む時間の後に動き出す
+   */
+  private coverAttack(sb: SetBall, tosser: CourtPlayer) {
+    const team = sb.team;
+    const slots: Local[] = COVER.slots.map(([r, deg]) => {
+      const a = (deg * Math.PI) / 180;
+      return { u: clamp(sb.hit.u + r * Math.cos(a), COVER.minU, COVER.maxU), v: clamp(sb.hit.v + r * Math.sin(a), -COURT.halfWidth + 0.2, COURT.halfWidth - 0.2) };
+    });
+    const free = this.court[team].filter(c => c !== sb.attacker);
+    for (const slot of slots) {
+      if (!free.length) break;
+      let bi = 0;
+      for (let i = 1; i < free.length; i++) {
+        if (dist(this.pos.get(free[i].p.id)!, slot) < dist(this.pos.get(free[bi].p.id)!, slot)) bi = i;
+      }
+      const c = free.splice(bi, 1)[0];
+      const decoy = c.front && c.role !== 'S' && c.role !== 'L' && c !== tosser;
+      const start = c === tosser ? sb.tSet + 0.15 : decoy ? sb.tHit - 0.1 : sb.tSet + readTime(this.skill(c, ['cover']));
+      this.moveTo(c, slot, this.freeAt(c, start), { asap: true });
+    }
   }
 
   // ============================================================
@@ -1069,7 +1108,7 @@ class RallySim {
     // 攻撃側のフォロー
     const cands = this.court[team].filter(c => (this.busyUntil.get(c.p.id) ?? 0) <= tLand - 0.05);
     const cover = cands
-      .map(c => ({ c, m: this.reachDist(c, TIMING.blockReboundFlight + 0.1) - dist(this.pos.get(c.p.id)!, land) }))
+      .map(c => ({ c, m: this.reachDist(c, TIMING.blockReboundFlight + 0.1) - dist(this.posAt(c, tBlock), land) }))
       .sort((x, y) => y.m - x.m)[0];
     // フォローの上手さはテクニック（場面 cover）。50で基本の確率
     const chance = cover ? clamp(BLOCK.coverChance * this.skill(cover.c, ['cover']) / 50, 0, 0.6) : 0;
