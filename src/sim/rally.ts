@@ -10,7 +10,7 @@ import {
   sideSpeed, standingReachCm, type AbilityKey,
 } from './ability';
 import {
-  ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
+  APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
   MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SET, SET_TARGET, TACTIC_FIT, TIMING,
 } from './constants';
 import { Rng } from './rng';
@@ -77,6 +77,30 @@ interface SetBall {
   secondary: boolean;
   /** 相手の返球を直接打つ */
   direct?: boolean;
+  /** 踏み切りの時刻 */
+  tTake: number;
+  /** 実際に跳ぶ高さ（m）。助走が短いと下がる */
+  jumpM: number;
+  /** 助走で直しきれなかったトスのずれ（m） */
+  miss: number;
+  /** 実際にボールに触る高さ（cm）。ジャンプの頂点からずれると低くなる */
+  contactCm: number;
+  /** 空中のどの段階で触ったか（0〜1、頂点は0.5） */
+  airPhase: number;
+}
+
+/** 助走の計画（乱数を使わない見積もり） */
+interface ApproachPlan {
+  /** 助走を始める時刻と位置 */
+  tA: number;
+  from: Local;
+  /** 助走の長さ（m）と、十分な長さに対する割合 */
+  d: number;
+  q: number;
+  /** 踏み切りに遅れる時間（秒） */
+  late: number;
+  /** 予定の踏み切りの時刻 */
+  tTakeNom: number;
 }
 
 interface Blocker {
@@ -480,8 +504,7 @@ class RallySim {
     const fs = this.frontSlots(team);
     for (const [c, s] of fs) {
       if (exclude.has(c.p.id) || c.role === 'S') continue;
-      const u = c.role === 'MB' ? 2.2 : 3.5;
-      this.moveTo(c, { u, v: this.laneOf(c, s) }, start(c), { asap: true });
+      this.moveTo(c, this.approachSpot(c, this.laneOf(c, s)), start(c), { asap: true });
     }
     for (const [c, s] of this.backSlots(team)) {
       if (exclude.has(c.p.id) || c.role === 'S') continue;
@@ -758,10 +781,18 @@ class RallySim {
       }
     }
     // 配球の判断：テクニックが高いほど、相手ブロックが薄くなりそうな攻撃を選ぶ
+    // アタッカーの助走の準備ができていない攻撃（戻りきれていない・間に合わない）ほど避ける
     const judge = this.skill(tosser, ['set', 'setChoice']) / 100;
-    const choice = this.rng.weighted(options.map(o => ({
-      item: o, w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter))),
-    })));
+    const choice = this.rng.weighted(options.map(o => {
+      const fl = TIMING.setFlight[o.type] + (useSetter ? 0 : TIMING.secondarySetExtra);
+      const pl = this.approachPlan(o.c, o.type, o.lane, bu.t, bu.t + fl, o.c.p.id === bu.firstToucher ? bu.tPass + 0.1 : -Infinity);
+      const unready = (1 - pl.q) + pl.late * 3;
+      return {
+        item: o,
+        w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter)))
+          * Math.exp(-SET.readyK * judge * unready),
+      };
+    }));
 
     // トスの精度
     const ssc: Scene[] = ['set'];
@@ -794,27 +825,50 @@ class RallySim {
     };
     const flight = TIMING.setFlight[setType] + (useSetter ? 0 : TIMING.secondarySetExtra);
     const tHit = bu.t + flight;
-    const hitZ = this.hitCm(attacker) / 100;
-    this.act(tosser, bu.t, 'set', bu.at, setZ, { setType, secondary: !useSetter });
-    this.ballTo(this.world(team, hit, hitZ), tHit, 'set', hitZ + TIMING.setApexAbove[setType] + (useSetter ? 0 : 0.5));
 
-    // 打ち手の助走、ほかの前衛はおとりの動き
-    // 助走：決まった時刻に動き出し、踏み切り（ジャンプの始まり）に着く
-    this.moveTo(attacker, { u: hit.u + 0.3, v: hit.v }, tHit - TIMING.approach, { arriveBy: tHit - TIMING.jumpRise, dur: TIMING.approach - TIMING.jumpRise, asap: true });
+    // 助走：計画どおりに始め、トスのずれを見て途中で踏み切る位置を直す。直しきれない分は残る
+    const plan = this.approachPlan(attacker, setType, choice.lane, bu.t, tHit, attacker.p.id === bu.firstToucher ? bu.tPass + 0.1 : -Infinity);
+    const asc: Scene[] = ['attack'];
+    if (setType === 'quick' || setType === 'timeDiff') asc.push('attackQuick');
+    if (!useSetter) asc.push('attackSecondary');
+    const aTech = this.skill(attacker, asc);
+    const tNom = tHit - TIMING.jumpRise;
+    const adjust = Math.max(0, tNom - (bu.t + readTime(aTech))) * (APPROACH.adjustBase + this.eff(attacker, 'speed') * APPROACH.adjustPer);
+    const miss = Math.max(setError * APPROACH.minResidual, setError - adjust);
+    // 踏み切りのタイミング：判断はテクニック。崩れたトスほど合わせにくい
+    const timing = this.rng.normal() * APPROACH.timingSigma * Math.max(0.2, APPROACH.timingTechPivot - aTech / 100)
+      * (1 + setError * APPROACH.timingPerSetError);
+    const tTake = tNom + plan.late + timing;
+    const jumpM = (jumpHeightCm(this.eff(attacker, 'jump')) / 100) * (APPROACH.standingRatio + (1 - APPROACH.standingRatio) * plan.q);
+    const contact = this.contactAt(attacker, tTake, jumpM, tHit);
+    const hitZ = contact.cm / 100;
+    this.act(tosser, bu.t, 'set', bu.at, setZ, { setType, secondary: !useSetter });
+    this.ballTo(this.world(team, hit, hitZ), tHit, 'set', Math.max(hitZ, this.hitCm(attacker) / 100) + TIMING.setApexAbove[setType] + (useSetter ? 0 : 0.5));
+
+    const take: Local = { u: hit.u + APPROACH.takeoffBack, v: hit.v };
+    if (setType === 'timeDiff') {
+      // 時間差：速攻の時刻に踏み込んで止まり（フェイク）、その場でもう一度跳ぶ
+      const tFake = plan.tTakeNom + plan.late;
+      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tFake - plan.tA) });
+      this.act(attacker, tFake, 'fakeJump', take, 0);
+    } else {
+      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tTake - plan.tA) });
+    }
     for (const [c] of fs) {
       if (c === attacker || c === tosser || c.role === 'S' || c.role === 'L') continue;
       const p = this.pos.get(c.p.id)!;
       this.moveTo(c, { u: Math.max(0.8, p.u - 1.8), v: p.v }, bu.t, { arriveBy: tHit });
     }
-    if (setType === 'timeDiff') {
-      this.act(attacker, bu.t + TIMING.setFlight.quick, 'fakeJump', { u: hit.u + 0.4, v: hit.v - 0.6 }, 0);
-    }
 
-    const sb: SetBall = { team, attacker, setType, hit, tSet: bu.t, tHit, setError, secondary: !useSetter };
+    const sb: SetBall = {
+      team, attacker, setType, hit, tSet: bu.t, tHit, setError, secondary: !useSetter,
+      tTake, jumpM, miss, contactCm: contact.cm, airPhase: contact.phase,
+    };
 
-    if (setError >= SET.unhittable) {
-      // 打てないトス：つなぎで返す
-      this.act(attacker, tHit, 'freeball', hit, Math.min(hitZ, 2.4));
+    // 打てないトス、または踏み切りのタイミングが大きく外れて空中で合わせられない時：跳ばずにつなぎで返す
+    const offTiming = contact.phase < APPROACH.minAirPhase || contact.phase > 1 - APPROACH.minAirPhase;
+    if (setError >= SET.unhittable || offTiming) {
+      this.act(attacker, tHit, 'freeball', hit, Math.min(Math.max(hitZ, 2.0), 2.4));
       this.touches++;
       const land: Local = { u: this.rng.range(4, 8), v: this.rng.range(-3.5, 3.5) };
       return {
@@ -827,6 +881,48 @@ class RallySim {
     }
     this.coverAttack(sb, tosser);
     return { kind: 'set', sb };
+  }
+
+  /** 助走を始める位置：ミドルはレーンの正面、アウトサイド・オポジットは外側から斜めに入る */
+  private approachSpot(c: CourtPlayer, lane: number): Local {
+    if (c.role === 'MB') return { u: APPROACH.startU.middle, v: lane };
+    return { u: APPROACH.startU.wing, v: clamp(lane + Math.sign(lane || 1) * APPROACH.wingOutside, -4.3, 4.3) };
+  }
+
+  private approachSpeed(c: CourtPlayer): number {
+    return APPROACH.speedBase + this.eff(c, 'speed') * APPROACH.speedPer;
+  }
+
+  /**
+   * 助走の計画。オープンはトスを見て（読む時間の後に）、平行はトスの少し前から、速攻・時間差はパスの間に助走を始める。
+   * アタッカーが助走を始める位置まで戻りきれていなければ、その途中の位置から助走する（助走が短くなる）。
+   * 遠すぎれば早めに動き出し、それでも間に合わなければ踏み切りが遅れる。
+   */
+  private approachPlan(c: CourtPlayer, type: SetType, lane: number, tSet: number, tHit: number, notBefore = -Infinity): ApproachPlan {
+    // 時間差は、速攻の時刻に踏み込む（フェイク）ところまでを助走とする
+    const tTakeNom = (type === 'timeDiff' ? tSet + TIMING.setFlight.quick : tHit) - TIMING.jumpRise;
+    const take: Local = { u: HIT_U + APPROACH.takeoffBack, v: lane };
+    const v = this.approachSpeed(c);
+    const full = APPROACH.fullLen[type];
+    const earliest = type === 'high' ? tSet + readTime(this.skill(c, ['attack'])) : type === 'fast' ? tSet - APPROACH.fastLead : -Infinity;
+    // 1本目を触った選手は、触った後からしか助走を始められない
+    const free = this.freeAt(c, notBefore);
+    let tA = Math.max(earliest, free, tTakeNom - full / v);
+    let from = this.posAt(c, tA);
+    let d = dist(from, take);
+    if (d > full) {
+      const t2 = Math.max(earliest, free, tTakeNom - d / v);
+      if (t2 < tA) { tA = t2; from = this.posAt(c, tA); d = dist(from, take); }
+    }
+    const late = Math.max(0, tA + d / v - tTakeNom);
+    return { tA, from, d, q: clamp(d / full, 0, 1), late, tTakeNom };
+  }
+
+  /** 踏み切りの時刻と跳ぶ高さから、打つ時刻にボールに触る高さを求める */
+  private contactAt(c: CourtPlayer, tTake: number, jumpM: number, tHit: number): { cm: number; phase: number } {
+    const phase = (tHit - tTake) / TIMING.jumpTotal;
+    const rise = phase > 0 && phase < 1 ? 4 * phase * (1 - phase) : 0;
+    return { cm: standingReachCm(c.p.height) + jumpM * 100 * rise, phase };
   }
 
   /**
@@ -861,20 +957,22 @@ class RallySim {
     const team = sb.team;
     const opp = other(team);
     const a = sb.attacker;
-    const hitCm = this.hitCm(a);
+    // 最高の打点（身長と跳躍だけで決まる）と、実際に触る高さ（助走の長さと踏み切りのタイミングで下がる）
+    const maxCm = this.hitCm(a);
+    const hitCm = sb.contactCm;
     const hitZ = hitCm / 100;
     const netCm = this.netH * 100;
     const n = (this.attackCount.get(a.p.id) ?? 0) + 1;
     this.attackCount.set(a.p.id, n);
     const quick = sb.setType === 'quick' || sb.setType === 'timeDiff';
     const sc: Scene[] = ['attack'];
-    if (sb.setError > ATTACK.softBadSetFrom) sc.push('attackBadSet');
+    if (sb.miss > ATTACK.softBadSetFrom) sc.push('attackBadSet');
     if (quick) sc.push('attackQuick');
     if (sb.secondary) sc.push('attackSecondary');
     if (n >= 2) sc.push('attackRepeat');
     if (sb.direct) sc.push('direct');
 
-    let penalty = sb.setError * ATTACK.tempoPenalty[sb.setType];
+    let penalty = sb.miss * ATTACK.missPenalty;
     const slow = quick ? Math.max(0, ATTACK.quickSpeedPivot - this.ab(a, 'speed', sc)) : 0;
     penalty += slow * ATTACK.quickSpeedPenalty;
     if (sb.direct) penalty += ATTACK.directPenalty;
@@ -884,7 +982,8 @@ class RallySim {
     // ネットを越えて強打できる最短の距離
     const clearZ = this.netH + ATTACK.netClearance;
     const minLand = hitZ - clearZ > 0.05 ? (sb.hit.u * clearZ) / (hitZ - clearZ) : Infinity;
-    const canHard = minLand <= ATTACK.hardTargetU[1] - 0.5;
+    const goodPhase = sb.airPhase >= APPROACH.minAirPhase && sb.airPhase <= 1 - APPROACH.minAirPhase;
+    const canHard = goodPhase && hitCm >= netCm + APPROACH.minOverNetCm && minLand <= ATTACK.hardTargetU[1] - 0.5;
 
     // ブロックの壁の厚さ（枚数・間に合い具合・高さ・ブロック能力）
     let wall = 0;
@@ -893,26 +992,26 @@ class RallySim {
     }
     // 軟打に切り替える判断：壁が厚いのを読めるほど（テクニック）軟打でかわす
     const judge = this.skill(a, sc) / 100;
-    const softRate = ATTACK.softBase + (sb.setError > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
+    const softRate = ATTACK.softBase + (sb.miss > ATTACK.softBadSetFrom ? ATTACK.softBadSet : 0)
       + ATTACK.softRead * Math.min(ATTACK.softReadWallMax, wall) * judge;
     const soft = !canHard || (!sb.direct && this.rng.chance(softRate));
     if (soft) sc.push('tip');
     const tech = this.skill(a, sc);
     const power = (this.phys(a, 'power', sc) * ATTACK.power + tech * ATTACK.tech
       + (hitCm - netCm) * ATTACK.height * this.w.physical - penalty) * (soft ? ATTACK.softPowerRatio : 1);
-    const errRate = clamp((ATTACK.errBase + sb.setError * ATTACK.errPerSetError - (tech - 50) * ATTACK.errTechSlope + slow * ATTACK.quickSpeedErr)
+    const errRate = clamp((ATTACK.errBase + sb.miss * ATTACK.errPerMiss - (tech - 50) * ATTACK.errTechSlope + slow * ATTACK.quickSpeedErr)
       * (soft ? ATTACK.softErrRatio : 1), 0.01, 0.6);
     const overBlock = blockers.length > 0 && hitCm - maxReach >= BLOCK.overMarginCm;
 
     // 打ち手・ブロッカーの動き
-    this.jump(a, sb.tHit - TIMING.jumpRise, TIMING.jumpTotal, jumpHeightCm(this.eff(a, 'jump')) / 100);
+    this.jump(a, sb.tTake, TIMING.jumpTotal, sb.jumpM);
     const tBlock = sb.tHit + 0.04;
     for (const b of blockers) {
       this.jump(b.cp, sb.tHit - TIMING.blockRise, TIMING.blockTotal, (b.reachCm - standingReachCm(b.cp.p.height)) / 100);
       this.act(b.cp, tBlock, 'block', b.spot, b.reachCm / 100);
     }
     const info: ActionInfo = {
-      setType: sb.setType, hitHeight: round(hitCm), blockReach: blockers.length ? round(maxReach) : undefined,
+      setType: sb.setType, hitHeight: round(maxCm), contactHeight: round(hitCm), blockReach: blockers.length ? round(maxReach) : undefined,
       blockers: blockers.map(b => b.cp.p.id), overBlock, direct: sb.direct || undefined,
     };
     this.act(a, sb.tHit, soft ? 'tip' : 'spike', sb.hit, hitZ, info);
@@ -1036,7 +1135,9 @@ class RallySim {
       const spot: Local = { u: 0.3, v: clamp(spotV, -4.4, 4.4) };
       // 読み（ブロック能力）：トスを見て動き出すまでの時間と、時間差のフェイクに跳ばされるか
       const read = this.blockSkill(c, [...sc, 'blockRead']);
-      const bite = clamp(BLOCK.timeDiffBite + (50 - read) * BLOCK.biteReadSlope, 0.05, 0.9);
+      // 打つミドルが速いほど、速攻のフェイクが本物らしく見えて跳ばされやすい
+      const fake = sb.setType === 'timeDiff' ? (this.eff(sb.attacker, 'speed') - 50) * APPROACH.fakeSpeedSlope : 0;
+      const bite = clamp(BLOCK.timeDiffBite + (50 - read) * BLOCK.biteReadSlope + fake, 0.05, 0.9);
       if (sb.setType === 'timeDiff' && c.role === 'MB' && this.rng.chance(bite)) {
         this.moveTo(c, { u: 0.3, v: clamp(-LANE_V.quick, -4, 4) }, sb.tSet, { dur: 0.2 });
         this.jump(c, tQuick - TIMING.blockRise, TIMING.blockTotal, (this.blockCm(c) - standingReachCm(c.p.height)) / 100);
@@ -1093,15 +1194,23 @@ class RallySim {
     }
     if (!best) return undefined;
     const a = best.c;
-    const hitZ = this.hitCm(a) / 100;
-    this.moveTo(a, { u: hit.u + 0.3, v: hit.v }, inc.tArrive - inc.flight + 0.2, { arriveBy: tHit - TIMING.jumpRise });
+    // ネット際なので助走は短く、踏み切りのタイミングも合わせにくい
+    const setError = this.rng.range(0, DIRECT.maxError);
+    const tech = this.skill(a, ['attack', 'direct']);
+    const tTake = tHit - TIMING.jumpRise
+      + this.rng.normal() * APPROACH.timingSigma * Math.max(0.2, APPROACH.timingTechPivot - tech / 100);
+    const jumpM = (jumpHeightCm(this.eff(a, 'jump')) / 100) * (APPROACH.standingRatio + (1 - APPROACH.standingRatio) * DIRECT.approachQ);
+    const contact = this.contactAt(a, tTake, jumpM, tHit);
+    const hitZ = contact.cm / 100;
+    this.moveTo(a, { u: hit.u + 0.3, v: hit.v }, inc.tArrive - inc.flight + 0.2, { arriveBy: tTake });
     this.ballTo(this.world(team, hit, hitZ), tHit, inc.ballKind, Math.max(inc.apex ?? 0, hitZ + 0.3));
     this.defenseBase(other(team), inc.tArrive - inc.flight + 0.2);
     return {
       kind: 'set',
       sb: {
         team, attacker: a, setType: 'high', hit, tSet: tHit - DIRECT.blockTime, tHit,
-        setError: this.rng.range(0, DIRECT.maxError), secondary: false, direct: true,
+        setError, secondary: false, direct: true,
+        tTake, jumpM, miss: setError, contactCm: contact.cm, airPhase: contact.phase,
       },
     };
   }

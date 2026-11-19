@@ -100,8 +100,6 @@ export const TIMING = {
   spikeSpeedPerPower: 0.3,
   jumpRise: 0.35,
   jumpTotal: 0.75,
-  /** スパイクの助走の長さ（動き出しから踏み切りの着地まで）。記録の見た目だけで結果には影響しない */
-  approach: 1.05,
   blockRise: 0.3,
   blockTotal: 0.65,
   endPause: 1.0,
@@ -180,6 +178,8 @@ export const SET = {
   } as Record<AttackTactic, Record<SetType, number>>,
   /** 配球の判断：ブロックが薄そうな攻撃ほど選びやすくなる強さ（テクニック100で最大） */
   choiceK: 0.9,
+  /** 配球の判断：アタッカーの助走の準備ができていない攻撃ほど避ける強さ（テクニック100で最大） */
+  readyK: 1.5,
   /** サイドへのトスがエースに行く確率 */
   aceShare: { ace: 0.85, balance: 0.55, quick: 0.5 } as Record<AttackTactic, number>,
 };
@@ -191,14 +191,16 @@ export const ATTACK = {
   tech: 0.3,
   height: 0.25,
   /** トスのずれ1mあたりの罰（攻撃の種類で速いほど大きい） */
-  tempoPenalty: { quick: 20, timeDiff: 15, fast: 10, high: 8 } as Record<SetType, number>,
-  /** 速攻・時間差でスピードが足りない時の罰（quickSpeedPivot 基準、1あたり） */
+  /** 助走で直しきれなかったトスのずれ（m）1mあたりの攻撃力の罰 */
+  missPenalty: 16,
+  /** 速攻・時間差でスピードが足りない時の罰（quickSpeedPivot 基準、1あたり）。テンポの速い攻撃に求められる速さ */
   quickSpeedPivot: 65,
   quickSpeedPenalty: 0.3,
   /** 同じく、ミス率の増え方（1あたり） */
   quickSpeedErr: 0.004,
   errBase: 0.06,
-  errPerSetError: 0.12,
+  /** 直しきれなかったトスのずれ1mあたりのミス率の増え方 */
+  errPerMiss: 0.12,
   errTechSlope: 0.0012,
   softErrRatio: 0.4,
   /** ダイレクトはトスに合わせて打つより難しい分の罰 */
@@ -248,7 +250,7 @@ export const BLOCK = {
   touchTechDiv: 110,
   /** 触った時：シャット確率 = sigmoid((ブロック力-攻撃力)/killScale + killBase) */
   killScale: 12,
-  killBase: 0.65,
+  killBase: 0.3,
   /** シャットの勝負で、打ち手のテクニック（ずらして当てる上手さ）が攻撃力に足される量 */
   killTech: 0.45,
   power: { base: 30, block: 0.5, height: 0.4, extra: 5 },
@@ -261,6 +263,42 @@ export const BLOCK = {
   coverChance: 0.16,
 };
 
+// ---------------- スパイクの助走 ----------------
+// 助走を始める位置からの数歩で加速し、最後に踏み込んで沈み、踏み切る。
+// 最高の打点は身長と跳躍だけで決まり、実際に跳ぶ高さは助走の長さで下がる。
+export const APPROACH = {
+  /** 助走を始める位置（ネットからの距離 m）。アタッカーは攻撃の準備でここへ下がる */
+  startU: { wing: 4.0, middle: 2.6 },
+  /** アウトサイド・オポジットは、打つレーンより外側（サイドライン寄り）から斜めに入る */
+  wingOutside: 0.6,
+  /** 十分な助走の長さ（m）。これより短いと跳ぶ高さが下がる */
+  fullLen: { quick: 1.6, timeDiff: 1.6, fast: 2.6, high: 2.9 } as Record<SetType, number>,
+  /** 助走の平均の速さ（m/s）＝ base ＋ スピード × per */
+  speedBase: 2.4,
+  speedPer: 0.032,
+  /** 助走なしで跳んだ時の跳び上がりの割合（十分な助走で1） */
+  standingRatio: 0.75,
+  /** 踏み切る位置：打つ点よりこれだけネットから離れた所で踏み切り、空中で前へ流れる */
+  takeoffBack: 0.4,
+  /** 平行はトスの少し前から助走を始める（秒） */
+  fastLead: 0.6,
+  /** 助走の途中で踏み切る位置を直す速さ（m/s）＝ base ＋ スピード × per */
+  adjustBase: 1.4,
+  adjustPer: 0.02,
+  /** 直す時間が十分あっても残るずれの割合 */
+  minResidual: 0.3,
+  /** 踏み切りのタイミングのずれ（秒）＝ 正規乱数 × sigma × (pivot − テクニック/100)。トスのずれが大きいほど増える */
+  timingSigma: 0.06,
+  timingTechPivot: 1.5,
+  timingPerSetError: 0.5,
+  /** 空中のこの割合より前・後で触ると、強打できない（頂点は0.5） */
+  minAirPhase: 0.08,
+  /** ネットよりこれだけ高く触れないと強打できない（cm） */
+  minOverNetCm: 15,
+  /** 時間差：打つミドルが速いほど、速攻のフェイクが本物らしく見えて相手が跳ばされやすい（スピード50基準、1あたり） */
+  fakeSpeedSlope: 0.004,
+};
+
 // ---------------- ダイレクト（相手の返球を直接打つ） ----------------
 export const DIRECT = {
   /** ネットからこの距離以内に返ってきたボールを打てる */
@@ -271,6 +309,8 @@ export const DIRECT = {
   maxError: 0.7,
   /** 相手ブロックが反応できる時間 */
   blockTime: 0.3,
+  /** ネット際から跳ぶので助走は短い（十分な助走に対する割合） */
+  approachQ: 0.4,
 };
 
 // ---------------- 作戦が合っている時の補正 ----------------

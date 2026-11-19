@@ -113,8 +113,10 @@ export interface ActionInfo {
   offset?: number;
   spin?: number;
   setType?: SetType;
-  /** スパイクの打点（cm） */
+  /** スパイクの最高の打点（cm）。身長と跳躍だけで決まる */
   hitHeight?: number;
+  /** 実際にボールに触った高さ（cm）。助走が短い・踏み切りのタイミングがずれると最高の打点より低くなる */
+  contactHeight?: number;
   /** ブロックの到達点（cm）。複数枚なら最も高いもの */
   blockReach?: number;
   blockers?: string[];
