@@ -11,7 +11,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SET, SET_TARGET, TACTIC_FIT, TIMING,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, TACTIC_FIT, TIMING,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, traitDelta, type Scene } from './traits';
@@ -127,7 +127,8 @@ const other = (t: TeamId): TeamId => (t === 'A' ? 'B' : 'A');
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
 const dist = (a: Local, b: Local) => Math.hypot(a.u - b.u, a.v - b.v);
-const round = (v: number) => Math.round(v * 1000) / 1000;
+/** 記録の数値は小数3桁に丸める（-0 は 0 にそろえる） */
+const round = (v: number) => Math.round(v * 1000) / 1000 || 0;
 
 export function simulateRally(input: RallyInput): RallyRecord {
   return new RallySim(input).run();
@@ -218,7 +219,7 @@ class RallySim {
     const s = this.input.serving;
     for (const c of this.court[s]) {
       const z = ZONE_POS[c.zoneIdx];
-      this.pos.set(c.p.id, c.zoneIdx === 0 ? { u: SERVE.serverU, v: -2.5 } : { u: c.front ? 1.2 : z.u, v: z.v });
+      this.pos.set(c.p.id, c.zoneIdx === 0 ? serveStartSpot(serveTypeOf(c.p)) : { u: c.front ? 1.2 : z.u, v: z.v });
     }
     this.placeReceiveFormation(other(s));
 
@@ -521,34 +522,75 @@ class RallySim {
     const rt = other(st);
     const server = this.court[st].find(c => c.zoneIdx === 0)!;
     const type = serveTypeOf(server.p);
-    const tc = TIMING.serveContact;
     const sc: Scene[] = ['serve', type === 'float' ? 'serveFloat' : type === 'jumpFloat' ? 'serveJumpFloat' : 'serveSpike'];
     const tech = this.skill(server, sc);
     const pc = SERVE.pressure[type];
-    const faultRate = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope), 0.01, 0.6);
-    const pressure = pc.base + tech * pc.tech + this.phys(server, 'power', sc) * pc.power + this.phys(server, 'jump', sc) * pc.jump;
+    const R_ = SERVE_RUN;
+
+    // 構える → サーブトスを上げる → 助走 → 踏み切り → 打つ
+    const tToss = R_.tossAt;
+    const tc = tToss + R_.tossFlight[type];
+    const start = this.pos.get(server.p.id)!;
+    const jump = type !== 'float';
+
+    // サーブトスのずれ（テクニック）を、助走の途中で直す（スピード）。直しきれなかった分が残る
+    const techK = Math.max(0.2, R_.techPivot - tech / 100);
+    const tossErr = Math.abs(this.rng.normal()) * R_.tossErr[type] * techK;
+    const tossDir = this.rng.range(0, Math.PI * 2);
+    const adjust = R_.adjustTime[type] * (APPROACH.adjustBase + this.eff(server, 'speed') * APPROACH.adjustPer);
+    const miss = Math.max(tossErr * R_.minResidual, tossErr - adjust);
+    // 踏み切りのタイミングのずれ（テクニック。トスがずれるほど合わせにくい）
+    const timing = jump ? this.rng.normal() * R_.timingSigma[type] * techK * (1 + tossErr) : 0;
+    const bad = miss + Math.abs(timing) * R_.timingToMiss;
+
+    // 打つ位置と高さ。ジャンプ系はジャンプの頂点からずれると低い所で打つ
+    const plan: Local = jump
+      ? { u: R_.takeoffU - R_.drift[type], v: start.v }
+      : { u: start.u - 0.3, v: start.v };
+    const contactL: Local = { u: plan.u + Math.cos(tossDir) * tossErr, v: plan.v + Math.sin(tossDir) * tossErr };
+    const standing = standingReachCm(server.p.height) / 100;
+    const jumpM = jumpHeightCm(this.eff(server, 'jump')) / 100 * R_.jumpRatio[type];
+    const tTake = tc - TIMING.jumpRise + timing;
+    const phase = (tc - tTake) / TIMING.jumpTotal;
+    const z = jump ? standing + jumpM * (phase > 0 && phase < 1 ? 4 * phase * (1 - phase) : 0) : standing + 0.1;
+    // 空中で合わせられないほどタイミングが外れたら、打ち損じ（ミス）
+    const misHit = jump && (phase < APPROACH.minAirPhase || phase > 1 - APPROACH.minAirPhase);
+
+    const faultRate = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope) + bad * R_.faultPerMiss, 0.01, 0.7);
+    const pressure = pc.base + tech * pc.tech + this.phys(server, 'power', sc) * pc.power + this.phys(server, 'jump', sc) * pc.jump
+      - bad * R_.pressurePerMiss;
     const shake = SERVE.shake[type];
 
-    const sPos = this.pos.get(server.p.id)!;
-    const standing = standingReachCm(server.p.height) / 100;
-    const jumpM = jumpHeightCm(this.eff(server, 'jump')) / 100;
-    const z = type === 'float' ? standing + 0.1 : type === 'jumpFloat' ? standing + jumpM * 0.5 : standing + jumpM * 0.9;
-    if (type !== 'float') this.jump(server, tc - TIMING.jumpRise, TIMING.jumpTotal, type === 'jumpFloat' ? jumpM * 0.5 : jumpM * 0.9);
-    this.ballPos = this.world(st, { u: sPos.u - 0.3, v: sPos.v }, 1.0);
+    // 記録：ボールを持って構える → トス → 助走 → 踏み切り → 打つ
+    const hand = this.world(st, { u: start.u - 0.25, v: start.v }, 1.0);
+    this.ballPos = hand;
     this.ballT = 0;
-    this.ballTo(this.world(st, { u: sPos.u - 0.3, v: sPos.v }, z), tc, 'serve', z + 1.5);
-    this.act(server, tc, 'serve', { u: sPos.u - 0.3, v: sPos.v }, z, { serveType: type });
+    this.ballTo(hand, tToss, 'serve');
+    this.act(server, tToss, 'toss', { u: start.u - 0.25, v: start.v }, 1.3, { serveType: type });
+    this.ballTo(this.world(st, contactL, z), tc, 'serve', z + R_.tossApexAbove[type]);
+    if (jump) {
+      // 踏み切る位置：打つ点の後ろ。直しきれなかった分だけ、ボールの真下からずれる
+      const k = tossErr > 1e-6 ? (tossErr - miss) / tossErr : 1;
+      const take: Local = {
+        u: Math.max(R_.takeoffU, plan.u + R_.drift[type] + Math.cos(tossDir) * tossErr * k),
+        v: plan.v + Math.sin(tossDir) * tossErr * k,
+      };
+      const tA = tTake - R_.approachDur[type];
+      this.moveTo(server, take, tA, { asap: true, dur: Math.max(0.15, tTake - tA) });
+      this.jump(server, tTake, TIMING.jumpTotal, jumpM);
+    }
+    this.act(server, tc, 'serve', contactL, z, { serveType: type });
     this.touches++;
 
-    // サーブを打った後はサーブ側が守備の隊形へ
+    // サーブを打った後はサーブ側が守備の隊形へ（ジャンプ系は着地してから）
     this.defenseBase(st, tc + 0.2);
 
     const flight = TIMING.serveFlight[type];
-    const target = this.serveAim(server, rt, flight, sc);
+    const target = this.serveAim(server, rt, flight, sc, bad * R_.aimPerMiss);
     const apex = type === 'spike' ? Math.max(z, this.netH + 0.6) : Math.max(z, this.netH + 0.8) + 0.4;
 
-    if (this.rng.chance(faultRate)) {
-      if (this.rng.chance(0.5)) {
+    if (misHit || this.rng.chance(faultRate)) {
+      if (misHit || this.rng.chance(0.5)) {
         const net = { x: 0, y: this.world(rt, target).y, z: this.netH - 0.3 };
         this.ballTo(net, tc + flight * 0.5, 'serve', Math.max(z, this.netH) + 0.2);
         const drop = this.world(st, { u: 0.5, v: target.v });
@@ -575,7 +617,7 @@ class RallySim {
    * サーブの狙い。判断（どこを狙うか）も実行（狙いどおり打てるか）もテクニックで決まる。
    * 判断の場面 serveAim では、狙いを決める時だけ能力が上がる特能（弱点狙撃など）が効く。
    */
-  private serveAim(server: CourtPlayer, rt: TeamId, flight: number, sc: Scene[]): Local {
+  private serveAim(server: CourtPlayer, rt: TeamId, flight: number, sc: Scene[], extraErr = 0): Local {
     const judge = this.skill(server, [...sc, 'serveAim']);
     const exec = this.skill(server, sc);
     const recv = this.receivers(rt);
@@ -587,7 +629,8 @@ class RallySim {
       const s = Math.min(...recv.map(c => dist(this.pos.get(c.p.id)!, l) - this.reachDist(c, flight) * 0.3));
       if (!best || s > best.s) best = { l, s };
     }
-    const err = Math.max(0.25, SERVE.aimErrBase - exec * SERVE.aimErrTech);
+    // 狙いのずれ：テクニック。トスと助走で直しきれなかったずれの分だけ大きくなる
+    const err = Math.max(0.25, SERVE.aimErrBase - exec * SERVE.aimErrTech) + extraErr;
     return {
       u: clamp(best!.l.u + this.rng.normal() * err, SERVE.targetU[0], SERVE.targetU[1]),
       v: clamp(best!.l.v + this.rng.normal() * err, SERVE.targetV[0], SERVE.targetV[1]),
@@ -1277,6 +1320,12 @@ export function serveTypeOf(p: Player): ServeType {
 /** 打球を読んで動き出すまでの時間（テクニックから。男女の重みを掛けた値を渡す） */
 function readTime(tech: number): number {
   return clamp(BODY.readMax - ((BODY.readMax - BODY.readMin) * tech) / 100, BODY.readFloor, BODY.readMax);
+}
+
+/** サーブを構える位置：フローターはエンドラインのすぐ後ろ、ジャンプ系は助走の長さだけ後ろ */
+export function serveStartSpot(type: ServeType): Local {
+  if (type === 'float') return { u: SERVE.serverU, v: -2.5 };
+  return { u: SERVE_RUN.takeoffU + SERVE_RUN.approachLen[type], v: -2.5 };
 }
 
 /** ブロックの読みの速さ（ブロック能力から） */

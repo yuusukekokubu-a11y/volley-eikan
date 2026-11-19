@@ -99,7 +99,9 @@ export type BallKind =
 
 export type ActionType =
   | 'serve' | 'receive' | 'dig' | 'set' | 'spike' | 'tip' | 'block'
-  | 'freeball' | 'cover' | 'fakeJump';
+  | 'freeball' | 'cover' | 'fakeJump'
+  /** サーブトスを上げる */
+  | 'toss';
 
 export type RallyEvent =
   | { type: 'move'; t: number; playerId: string; to: Vec2; dur: number }

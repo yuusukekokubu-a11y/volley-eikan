@@ -82,7 +82,6 @@ export const RECEIVE_FORMATION = {
 
 // ---------------- 時間 ----------------
 export const TIMING = {
-  serveContact: 0.9,
   serveFlight: { float: 1.35, jumpFloat: 1.2, spike: 0.9 } as Record<ServeType, number>,
   passFlight: 1.1,
   passFlightPerOffset: 0.08,
@@ -107,25 +106,61 @@ export const TIMING = {
 
 // ---------------- サーブ ----------------
 export const SERVE = {
-  /** 基本のミス率（テクニック50の時）。テクニックで増減 */
-  faultRate: { float: 0.05, jumpFloat: 0.09, spike: 0.17 } as Record<ServeType, number>,
+  /** 基本のミス率（テクニック50の時）。テクニックで増減。これに、トスと助走で直しきれなかったずれによるミスが加わる */
+  faultRate: { float: 0.042, jumpFloat: 0.058, spike: 0.111 } as Record<ServeType, number>,
   faultTechSlope: 0.01, // テクニック1あたり減る割合（50基準）
   /** 威力＝base＋各能力×係数（phys は男女の重みが掛かる部分） */
   pressure: {
-    float: { base: 25, tech: 0.35, power: 0.05, jump: 0 },
-    jumpFloat: { base: 30, tech: 0.3, power: 0.1, jump: 0.1 },
-    spike: { base: 25, tech: 0.1, power: 0.45, jump: 0.2 },
+    float: { base: 25.5, tech: 0.35, power: 0.05, jump: 0 },
+    jumpFloat: { base: 31, tech: 0.3, power: 0.1, jump: 0.1 },
+    spike: { base: 27, tech: 0.1, power: 0.45, jump: 0.2 },
   } as Record<ServeType, { base: number; tech: number; power: number; jump: number }>,
   /** 揺れ（レシーブのばらつきが増える） */
   shake: { float: 0.35, jumpFloat: 0.55, spike: 0 } as Record<ServeType, number>,
   targetU: [1.5, 8.6],
   targetV: [-4.2, 4.2],
+  /** フローターを打つ位置（ネットからの距離） */
   serverU: 9.8,
   /** 狙いの判断：比べる候補の数 = 1 + テクニック/aimTechDiv */
   aimTechDiv: 30,
   /** 狙いのずれ（m）＝aimErrBase - テクニック×aimErrTech（下限0.25） */
   aimErrBase: 1.4,
   aimErrTech: 0.01,
+};
+
+// ---------------- サーブのトスと助走 ----------------
+// 構える → サーブトスを上げる → 助走 → 踏み切り → 打つ。フローターは助走なしでその場で打つ。
+export const SERVE_RUN = {
+  /** 構えてからサーブトスを上げるまで（秒） */
+  tossAt: 0.6,
+  /** サーブトスを上げてから打つまで（秒）。スパイクサーブほど高く上げる */
+  tossFlight: { float: 0.55, jumpFloat: 0.95, spike: 1.25 } as Record<ServeType, number>,
+  /** トスの最高点が、打つ高さよりどれだけ上か（m） */
+  tossApexAbove: { float: 0.5, jumpFloat: 1.2, spike: 2.0 } as Record<ServeType, number>,
+  /** 踏み切る位置（ネットからの距離。エンドラインの後ろ） */
+  takeoffU: 9.3,
+  /** 助走の長さ（m）と時間（秒）。助走を始める位置＝踏み切る位置＋長さ */
+  approachLen: { float: 0, jumpFloat: 1.5, spike: 2.6 } as Record<ServeType, number>,
+  approachDur: { float: 0, jumpFloat: 0.55, spike: 0.8 } as Record<ServeType, number>,
+  /** 空中で前へ流れる分（触る点は踏み切りより前） */
+  drift: { float: 0, jumpFloat: 0.4, spike: 0.7 } as Record<ServeType, number>,
+  /** 跳躍に対する跳ぶ高さの割合 */
+  jumpRatio: { float: 0, jumpFloat: 0.5, spike: 0.9 } as Record<ServeType, number>,
+  /** トスのずれ（m）の大きさ（テクニック50の時）＝ 正規乱数 × err × (techPivot − テクニック/100) */
+  tossErr: { float: 0.1, jumpFloat: 0.25, spike: 0.4 } as Record<ServeType, number>,
+  techPivot: 1.5,
+  /** トスを見てから直せる時間（秒）。直す速さはスパイクの助走と同じ（スピード） */
+  adjustTime: { float: 0.04, jumpFloat: 0.11, spike: 0.14 } as Record<ServeType, number>,
+  /** 直す時間が十分あっても残るずれの割合 */
+  minResidual: 0.3,
+  /** 踏み切りのタイミングのずれ（秒）の大きさ（テクニック50、トスのずれ0の時） */
+  timingSigma: { float: 0, jumpFloat: 0.04, spike: 0.05 } as Record<ServeType, number>,
+  /** タイミングのずれ1秒を、位置のずれ何mに相当させるか */
+  timingToMiss: 2.0,
+  /** 直しきれなかったずれ1mあたり：威力の低下、ミス率の増加、狙いのずれの増加（m） */
+  pressurePerMiss: 12,
+  faultPerMiss: 0.25,
+  aimPerMiss: 0.8,
 };
 
 // ---------------- レシーブ・ディグ（1本目） ----------------
