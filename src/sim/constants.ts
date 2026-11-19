@@ -465,3 +465,21 @@ export const LOOKS = { hairStyles: 4, hairColors: 3, skins: 3 };
 
 /** 左利きの割合 */
 export const LEFT_HANDED_RATE = 0.1;
+
+/** 緑（行動の傾向）の効き。5段階の対象外で、緑ごとにここで決める */
+export const STYLE = {
+  /** 強気サーブ／安全サーブ：ミスの率の倍率と、サーブの強さ（レシーブへの圧）の増減 */
+  serveRisk: {
+    aggressive: { fault: 1.5, pressure: 5 },
+    safe: { fault: 0.55, pressure: -5 },
+  },
+};
+
+/** 特能の 5段階で表せない効き（相談して決めたもの） */
+export const TRAIT_EXTRA = {
+  /** スパイクミスのうちネットにかかる割合（ふつうは0.45）。アウト多め／ネットにかける */
+  attackMissNet: { normal: 0.45, out: 0.2, net: 0.75 },
+  /** 疲れのたまり方の倍率：全力／サボり屋 */
+  fatigueAllOut: 1.3,
+  fatigueSlacker: 0.7,
+};

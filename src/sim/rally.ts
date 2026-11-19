@@ -12,10 +12,10 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, TACTIC_FIT, TIMING,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA,
 } from './constants';
 import { Rng } from './rng';
-import { canDo, traitDelta, type Scene } from './traits';
+import { canDo, styleOf, traitDelta, traitExtra, type Scene } from './traits';
 import type {
   ActionInfo, ActionType, BallKind, BallSegment, Player, PlayerPlacement, PointReason, RallyEvent,
   RallyInput, RallyRecord, Role, ServeType, SetType, TeamId, Vec2, Vec3,
@@ -268,15 +268,17 @@ class RallySim {
     return effective(c.p, k, c.fatigue);
   }
   /** その場面での能力（特能の上下を含む） */
-  private ab(c: CourtPlayer, k: AbilityKey, scenes: Scene[] = []): number {
+  private ab(c: CourtPlayer, k: AbilityKey, scenes: Scene[] = [], facing?: Player): number {
     const set = new Set<Scene>(['all', ...scenes]);
     if (this.clutch) set.add('clutch');
+    if (c.p.condition < 0) set.add('slump');
+    if (c.p.condition > 0) set.add('goodForm');
     const row = { front: c.front, teammates: this.court[c.team].map(m => ({ p: m.p, front: m.front })) };
     // チームにかかっている一時的な上下（タイムアウトの監督特能など）
     let buff = 0;
     for (const e of this.input.teams[c.team].buffs ?? []) if (e.ability === k && set.has(e.scene)) buff += e.delta;
     // 信頼度による上乗せ（試合中だけ、全能力）
-    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row) + buff + trustDelta(c.p));
+    return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row, facing) + buff + trustDelta(c.p));
   }
   /** 体の能力（跳躍・パワー・スピード）が判定に効く量。男女の重みを掛ける */
   private phys(c: CourtPlayer, k: 'jump' | 'power' | 'speed', scenes: Scene[] = []): number {
@@ -563,9 +565,12 @@ class RallySim {
     // 空中で合わせられないほどタイミングが外れたら、打ち損じ（ミス）
     const misHit = jump && (phase < APPROACH.minAirPhase || phase > 1 - APPROACH.minAirPhase);
 
-    const faultRate = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope) + bad * R_.faultPerMiss, 0.01, 0.7);
+    // 緑：強気サーブ／安全サーブ
+    const risk = styleOf(server.p, 'serveRisk');
+    const rs = risk ? STYLE.serveRisk[risk] : { fault: 1, pressure: 0 };
+    const faultRate = clamp(SERVE.faultRate[type] * (1 - (tech - 50) * SERVE.faultTechSlope) * rs.fault + bad * R_.faultPerMiss, 0.01, 0.7);
     const pressure = pc.base + tech * pc.tech + this.phys(server, 'power', sc) * pc.power + this.phys(server, 'jump', sc) * pc.jump
-      - bad * R_.pressurePerMiss;
+      - bad * R_.pressurePerMiss + rs.pressure;
     const shake = SERVE.shake[type];
 
     // 記録：ボールを持って構える → トス → 助走 → 踏み切り → 打つ
@@ -1070,7 +1075,8 @@ class RallySim {
 
     // ミス
     if (this.rng.chance(errRate)) {
-      if (!soft && this.rng.chance(0.45)) {
+      const side = traitExtra(a.p).attackMissSide;
+      if (!soft && this.rng.chance(TRAIT_EXTRA.attackMissNet[side ?? 'normal'])) {
         const net = { x: 0, y: this.world(team, sb.hit).y, z: this.netH - this.rng.range(0.2, 0.8) };
         this.ballTo(net, sb.tHit + 0.12, 'spike');
         this.land(this.world(team, { u: 0.4, v: sb.hit.v }), sb.tHit + 0.7, 'drop');

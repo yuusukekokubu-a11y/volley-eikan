@@ -5,7 +5,7 @@
 import { FATIGUE, MATCH } from './constants';
 import { MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
 import { simulateRally } from './rally';
-import type { StatEffect } from './traits';
+import { traitExtra, type StatEffect } from './traits';
 import type { Gender, Player, RallyRecord, Role, Tactics, TeamId, TeamState } from './types';
 
 export const OWN: TeamId = 'A';
@@ -169,7 +169,9 @@ export class SetGame {
       for (const p of [...team.rotation.map(s => s.player), ...(team.libero ? [team.libero] : [])]) {
         onCourt.add(p.id);
         const load = rec.load[p.id] ?? 0;
-        this.fatigue[p.id] = Math.min(1, (this.fatigue[p.id] ?? 0) + load * FATIGUE.perLoad * Math.max(0.2, FATIGUE.pivot - p.stamina / 100));
+        // 全力・サボり屋は疲れのたまり方が変わる
+        const mul = traitExtra(p).fatigueMul;
+        this.fatigue[p.id] = Math.min(1, (this.fatigue[p.id] ?? 0) + load * FATIGUE.perLoad * Math.max(0.2, FATIGUE.pivot - p.stamina / 100) * mul);
       }
       for (const p of this.bench[t]) if (!onCourt.has(p.id)) this.fatigue[p.id] = Math.max(0, (this.fatigue[p.id] ?? 0) - FATIGUE.benchRecover);
     }

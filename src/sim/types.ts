@@ -129,6 +129,10 @@ export interface RallyContext {
   setNumber: number;
   isFinalSet: boolean;
   score: Record<TeamId, number>;
+  /** 今のサーバーのサーブで続けて取っている点（連続サーブの場面用） */
+  serveStreak?: number;
+  /** 途中から入った選手の ID（ピンチサーバーの場面用） */
+  subbedIn?: string[];
 }
 
 export interface RallyInput {
