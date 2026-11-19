@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -1213,6 +1213,24 @@ class RallySim {
     };
     this.act(a, sb.tHit, soft ? 'tip' : 'spike', sb.hit, hitZ, info);
     this.touches++;
+
+    // リバウンド（解禁型）：ブロックの壁が厚い時、わざと軟らかくブロックに当てて自分のコートに戻し、攻撃をやり直す
+    if (soft && !sb.direct && blockers.length && wall >= REBOUND.minWall && canDo(a.p, 'rebound') && this.rng.chance(REBOUND.rate)) {
+      const main = blockers[0];
+      const contact = this.world(opp, { u: 0.15, v: -sb.hit.v }, main.reachCm / 100 - 0.15);
+      this.ballTo(contact, tBlock, 'tip');
+      // うまく当てられないと、そのまま自分のコートに落ちる（テクニック）
+      const ok = this.rng.chance(clamp(REBOUND.okBase + (tech - 50) * REBOUND.okTech, 0.3, 0.97));
+      const land: Local = { u: this.rng.range(REBOUND.landU[0], REBOUND.landU[1]), v: clamp(sb.hit.v + this.rng.range(-1.2, 1.2), -4.3, 4.3) };
+      return {
+        kind: 'incoming',
+        inc: {
+          team, kind: 'blockBack', land, tArrive: tBlock + REBOUND.flight, flight: REBOUND.flight,
+          pressure: ok ? REBOUND.pressure : REBOUND.pressure * 3, shake: 0.1, apex: contact.z + (ok ? 1.3 : 0.4),
+          ballKind: 'deflect', dropReason: 'blockKill', dropKey: main.cp.p.id, sender: main.cp,
+        },
+      };
+    }
 
     // ミス
     if (this.rng.chance(errRate)) {

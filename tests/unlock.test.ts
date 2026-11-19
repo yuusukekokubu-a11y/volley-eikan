@@ -57,4 +57,18 @@ describe('解禁型の動作', () => {
     }
     expect(n).toBeGreaterThan(5);
   });
+
+  it('リバウンド：特能がなければ出ない。持っていれば軟打をブロックに当て、自分のチームが次に触る', () => {
+    const isRebound = (r: RallyRecord) => {
+      const acts = actions(r);
+      return acts.some((e, k) => {
+        if (e.action !== 'tip' || acts[k + 1]?.action !== 'block') return false;
+        const team = r.placements.find(p => p.playerId === e.playerId)!.team;
+        const next = acts.slice(k + 1).find(x => x.action !== 'block');
+        return !!next && r.placements.find(p => p.playerId === next.playerId)!.team === team;
+      });
+    };
+    expect(rallies(null, []).some(isRebound)).toBe(false);
+    expect(rallies('rebound', ['OH', 'OP', 'MB']).filter(isRebound).length).toBeGreaterThan(10);
+  });
 });

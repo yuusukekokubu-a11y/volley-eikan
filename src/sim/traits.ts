@@ -183,6 +183,7 @@ const LIST: TraitDef[] = [
   unlock('spikeServe', 'スパイクサーブ◯', 'spikeServe'),
   unlock('backAttack', 'バックアタック', 'backAttack', ['OH', 'OP']),
   unlock('dump', 'ツーアタック', 'dump', ['S']),
+  unlock('rebound', 'リバウンド', 'rebound', ['OH', 'OP', 'MB']),
 
   // ================= 青：全プレー =================
   blue('clutch', '勝負強い', each('clutch', ALL5, 5)),

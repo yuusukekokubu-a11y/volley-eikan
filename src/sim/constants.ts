@@ -588,3 +588,17 @@ export const DUMP = {
   blockRange: 1.5,
   blockChance: 0.15,
 };
+
+/** リバウンド（解禁型）：ブロックの壁が厚い時、わざと軟らかくブロックに当てて自分のコートに戻し、攻撃をやり直す */
+export const REBOUND = {
+  /** 軟打を選んだ時、壁がこれ以上厚ければリバウンドを狙う */
+  minWall: 0.5,
+  rate: 0.6,
+  /** うまく当てて拾いやすいボールにできる確率＝ okBase ＋（テクニック−50）× okTech */
+  okBase: 0.75,
+  okTech: 0.006,
+  /** 戻ってくるボールの落ちる所（自分のコートのネットからの距離）と、飛んでいる時間・強さ */
+  landU: [1.0, 3.0] as [number, number],
+  flight: 0.8,
+  pressure: 8,
+};
