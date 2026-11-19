@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -971,6 +971,12 @@ class RallySim {
       };
     }));
 
+    // ツーアタック（解禁型）：前衛のセッターが、パスが良い時に2本目を片手で相手コートに落とす
+    if (useSetter && tosser.front && canDo(tosser.p, 'dump') && bu.offset <= DUMP.maxOffset
+      && this.rng.chance(DUMP.rate * clamp(this.skill(tosser, ['set', 'setChoice']) / 50, 0.5, 1.5))) {
+      return this.dump(tosser, bu);
+    }
+
     // トスの精度
     const ssc: Scene[] = ['set'];
     if (!useSetter) ssc.push('setSecondary');
@@ -1321,6 +1327,45 @@ class RallySim {
       inc: {
         team: opp, kind: 'spike', land, tArrive: sb.tHit + flight, flight, pressure: power, shake: 0, readDelay: this.readDelay(sb),
         ballKind: 'spike', dropReason: 'kill', dropKey: a.p.id, sender: a,
+      },
+    };
+  }
+
+  /**
+   * ツーアタック：トスの構えから小さく跳び、片手で相手コートのネット際に落とす。
+   * 相手はトスだと思って構えているので、読むのが遅れる（readDelay）
+   */
+  private dump(setter: CourtPlayer, bu: BallUp): Step {
+    const team = bu.team;
+    const opp = other(team);
+    const tech = this.skill(setter, ['tip']);
+    const z = standingReachCm(setter.p.height) / 100 + DUMP.jumpM;
+    this.jump(setter, bu.t - TIMING.jumpRise * 0.6, TIMING.jumpTotal * 0.6, DUMP.jumpM);
+    this.act(setter, bu.t, 'dump', bu.at, z);
+    this.touches++;
+    this.load[setter.p.id] += LOAD.set;
+    // 相手の前衛がセッターの正面にいれば、ブロックで止められることがある（読み＝ブロック能力）
+    const laneDef = -bu.at.v;
+    const front = this.court[opp].filter(c => c.front && c.role !== 'L' && Math.abs(this.posAt(c, bu.t).v - laneDef) <= DUMP.blockRange);
+    const blocker = front.sort((x, y) => this.blockSkill(y, ['blockRead']) - this.blockSkill(x, ['blockRead']))[0];
+    if (blocker && this.rng.chance(DUMP.blockChance * this.blockSkill(blocker, ['blockRead']) / 50)) {
+      const spot: Local = { u: 0.3, v: laneDef };
+      this.moveTo(blocker, spot, bu.t - 0.4, { dur: 0.25 });
+      const reach = this.blockCm(blocker) / 100;
+      this.jump(blocker, bu.t - TIMING.blockRise + 0.1, TIMING.blockTotal, Math.max(0.1, reach - standingReachCm(blocker.p.height) / 100));
+      this.act(blocker, bu.t + 0.1, 'block', spot, reach);
+      this.ballTo(this.world(opp, { u: 0.15, v: laneDef }, reach - 0.1), bu.t + 0.1, 'tip');
+      const back: Local = { u: this.rng.range(0.3, 2.0), v: clamp(bu.at.v + this.rng.range(-1, 1), -4.3, 4.3) };
+      this.land(this.world(team, back), bu.t + 0.1 + TIMING.blockReboundFlight, 'blockRebound');
+      return this.point(opp, 'blockKill', bu.t + 0.1 + TIMING.blockReboundFlight, blocker.p.id);
+    }
+    const land = this.aim(opp, DUMP.targetU, DUMP.flight, tech, [], bu.t);
+    return {
+      kind: 'incoming',
+      inc: {
+        team: opp, kind: 'tip', land, tArrive: bu.t + DUMP.flight, flight: DUMP.flight, readDelay: DUMP.readDelay,
+        pressure: DUMP.pressure, shake: 0, apex: z + 0.25,
+        ballKind: 'tip', dropReason: 'tipKill', dropKey: setter.p.id, sender: setter,
       },
     };
   }

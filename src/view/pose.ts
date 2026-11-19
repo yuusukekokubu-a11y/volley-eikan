@@ -59,6 +59,9 @@ export function armAngles(pl: PlayerFrame): [number, number] | undefined {
       return [PI * 0.97, PI * 0.97];
     case 'set':
       return [PI * 0.85, PI * 0.85];
+    case 'dump':
+      // ツーアタック：トスの構えから、手前の手だけを伸ばして押し込む
+      return t < 0.5 ? [PI * 0.85, PI * 0.85] : [PI * 0.95, PI * 0.6];
     case 'serve':
       return t < 0.5 ? [PI * 0.4, PI * 0.9] : [PI * (1.2 - 0.5 * (t - 0.5) * 2), PI * 0.5];
     case 'receive':
@@ -151,6 +154,7 @@ export function elbowAngles(pl: PlayerFrame): [number, number] {
     case 'toss': return [0.4, 0.15];
     case 'block': return [0.06, 0.06];
     case 'set': return [1.35, 1.35];                           // 額の上で肘を曲げて受ける
+    case 'dump': return t < 0.5 ? [1.35, 1.35] : [0.3, 0.8];
     case 'serve': return t < 0.5 ? [0.3, 0.2] : [0.15, 0.3];
     case 'receive': case 'dig': case 'cover': case 'dive': return [0.04, 0.04];
   }

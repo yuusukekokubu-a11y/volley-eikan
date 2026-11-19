@@ -51,7 +51,7 @@ const DIMS = [
 const FRAME = 1 / 30;
 const ACTION_NAME: Partial<Record<ActionType, string>> = {
   serve: 'サーブ', receive: 'レシーブ', dig: 'ディグ', set: 'トス', spike: 'スパイク', tip: 'フェイント',
-  block: 'ブロック', freeball: 'つなぎ', cover: 'フォロー', fakeJump: '時間差のフェイク', toss: 'サーブトス',
+  block: 'ブロック', freeball: 'つなぎ', cover: 'フォロー', fakeJump: '時間差のフェイク', toss: 'サーブトス', dump: 'ツーアタック',
 };
 const SET_NAME: Record<string, string> = { quick: '速攻', timeDiff: '時間差', fast: '平行', high: 'オープン', back: 'バックアタック', broad: 'ブロード' };
 

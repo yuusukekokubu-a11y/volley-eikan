@@ -40,4 +40,21 @@ describe('解禁型の動作', () => {
     }
     expect(n).toBeGreaterThan(20);
   });
+
+  it('ツーアタック：特能がなければ出ない。持っていれば前衛のセッターが2本目を相手コートに落とす', () => {
+    expect(rallies(null, []).some(r => actions(r).some(e => e.action === 'dump'))).toBe(false);
+    let n = 0;
+    for (const r of rallies('dump', ['S'])) {
+      for (const e of actions(r)) {
+        if (e.action !== 'dump') continue;
+        n++;
+        const pl = r.placements.find(p => p.playerId === e.playerId)!;
+        expect(pl.role).toBe('S');
+        // 次にボールに触るのは相手（またはそのまま得点）
+        const next = actions(r).find(x => x.t > e.t && x.action !== 'block');
+        if (next) expect(r.placements.find(p => p.playerId === next.playerId)!.team).not.toBe(pl.team);
+      }
+    }
+    expect(n).toBeGreaterThan(5);
+  });
 });

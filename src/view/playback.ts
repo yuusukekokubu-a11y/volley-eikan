@@ -4,7 +4,7 @@
 
 import type { ActionType, BallSegment, RallyEvent, RallyRecord, Role, TeamId, Vec2, Vec3 } from '../sim/types';
 
-export type Pose = 'ready' | 'serve' | 'toss' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover' | 'dive';
+export type Pose = 'ready' | 'serve' | 'toss' | 'receive' | 'set' | 'spike' | 'block' | 'tip' | 'dig' | 'cover' | 'dive' | 'dump';
 
 /** ジャンプの段階：踏み込み（沈む）→ 空中 → 着地（膝で沈む） */
 export type JumpPhase = 'none' | 'prep' | 'air' | 'land';
@@ -89,6 +89,7 @@ const POSE_WINDOW: Partial<Record<ActionType, { pose: Pose; before: number; afte
   set: { pose: 'set', before: 0.35, after: 0.2 },
   spike: { pose: 'spike', before: 0.35, after: 0.3 },
   tip: { pose: 'tip', before: 0.35, after: 0.25 },
+  dump: { pose: 'dump', before: 0.35, after: 0.25 },
   block: { pose: 'block', before: 0.35, after: 0.35 },
   freeball: { pose: 'set', before: 0.3, after: 0.2 },
   cover: { pose: 'dig', before: 0.3, after: 0.3 },
@@ -96,7 +97,7 @@ const POSE_WINDOW: Partial<Record<ActionType, { pose: Pose; before: number; afte
 
 const HANDS: Partial<Record<ActionType, Contact['hands']>> = {
   receive: 'both', dig: 'both', cover: 'both', set: 'both', freeball: 'both', block: 'both',
-  spike: 'hit', tip: 'hit', serve: 'hit',
+  spike: 'hit', tip: 'hit', serve: 'hit', dump: 'hit',
 };
 
 const isDive = (a: ActionEv) => (a.action === 'dig' || a.action === 'receive' || a.action === 'cover') && a.pos.z <= 0.3;
@@ -234,7 +235,7 @@ export class Playback {
     for (const e of this.rec.events) {
       if (e.t > t) break;
       if (e.type === 'point') point = e;
-      if (e.type === 'action' && (e.action === 'spike' || e.action === 'tip')) lastAttack = e;
+      if (e.type === 'action' && (e.action === 'spike' || e.action === 'tip' || e.action === 'dump')) lastAttack = e;
     }
     return { t, players, ball, ballVisible: visible, point, lastAttack };
   }
@@ -312,7 +313,10 @@ export function pointText(rec: RallyRecord, teamName: (t: TeamId) => string): st
   const w = teamName(rec.winner);
   switch (rec.reason) {
     case 'kill': return `${who}のスパイク`;
-    case 'tipKill': return `${who}のフェイント`;
+    case 'tipKill': {
+      const lastAct = rec.events.filter(e => e.type === 'action' && e.playerId === rec.keyPlayerId).pop();
+      return lastAct?.type === 'action' && lastAct.action === 'dump' ? `${who}のツーアタック` : `${who}のフェイント`;
+    }
     case 'blockKill': return `${who}のブロック`;
     case 'blockOut': return `${who}のブロックアウト`;
     case 'ace': return `${who}のサービスエース`;
