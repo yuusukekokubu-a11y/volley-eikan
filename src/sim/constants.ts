@@ -74,7 +74,11 @@ export const DEFENSE_POS = {
   offBlockerU: 3.2,
 };
 
-export const RECEIVE_FORMATION = { u: 6.0, spread3: [-3, 0, 3], spread2: [-2.2, 2.2] };
+export const RECEIVE_FORMATION = {
+  u: 6.0, spread3: [-3, 0, 3], spread2: [-2.2, 2.2],
+  /** 後衛のセッターがサーブレシーブの時に立つ位置（ネットからの距離） */
+  backSetterU: 5.0,
+};
 
 // ---------------- 時間 ----------------
 export const TIMING = {

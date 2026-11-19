@@ -221,7 +221,8 @@ class RallySim {
     for (const c of this.court[team]) {
       if (recv.includes(c)) continue;
       const z = ZONE_POS[c.zoneIdx];
-      if (c.role === 'S') this.pos.set(c.p.id, c.front ? { u: 1.0, v: -1.5 } : { u: 3.0, v: -2.0 });
+      // 後衛のセッターは自分のローテーション位置の近くに立ち、サーブと同時に前へ上がってくる
+      if (c.role === 'S') this.pos.set(c.p.id, c.front ? { u: 1.0, v: -1.5 } : { u: RECEIVE_FORMATION.backSetterU, v: z.v * 0.8 });
       else this.pos.set(c.p.id, c.front ? { u: 1.5, v: z.v } : { u: 7.5, v: z.v });
     }
   }
@@ -424,8 +425,14 @@ class RallySim {
     return slot === 'left' ? LANE_V.left : slot === 'right' ? LANE_V.right : LANE_V.timeDiff;
   }
 
-  /** 相手の攻撃に備える守備の基本隊形 */
-  private defenseBase(team: TeamId, t: number) {
+  /** 跳んでいる選手は、着地して立て直してから動き出す */
+  private freeAt(c: CourtPlayer, t: number): number {
+    return Math.max(t, (this.busyUntil.get(c.p.id) ?? -Infinity) + BODY.landingRecovery);
+  }
+
+  /** 相手の攻撃に備える守備の基本隊形。react なら各自が読む時間の後に動き出す */
+  private defenseBase(team: TeamId, t: number, react = false) {
+    const start = (c: CourtPlayer) => this.freeAt(c, t) + (react ? readTime(this.skill(c, ['dig'])) : 0);
     const ts = this.input.teams[team];
     const fs = this.frontSlots(team);
     const base = BLOCK_BASE_V[ts.tactics.block];
@@ -445,22 +452,26 @@ class RallySim {
         shift = Math.sign(laneDef) * BLOCK_BASE_V.dedicate.shift * Math.min(1.5, this.w.tactic);
       }
     }
-    for (const [c, s] of fs) this.moveTo(c, { u: 0.8, v: clamp(base[s] + shift, -4, 4) }, t);
+    for (const [c, s] of fs) this.moveTo(c, { u: 0.8, v: clamp(base[s] + shift, -4, 4) }, start(c));
     const dp = DEFENSE_POS[ts.tactics.receive];
-    for (const [c, s] of this.backSlots(team)) this.moveTo(c, dp[s], t);
+    for (const [c, s] of this.backSlots(team)) this.moveTo(c, dp[s], start(c));
   }
 
   /** こちらの攻撃に向けて助走の位置へ */
-  private attackBase(team: TeamId, t: number, exclude: Set<string>) {
+  /**
+   * こちらの攻撃に向けて助走の位置へ。start は選手ごとの動き出しの時刻
+   * （ボールに触らない選手は、相手が打った時点で読む時間の後に、跳んでいた選手は着地して立て直したら動き出す）
+   */
+  private attackBase(team: TeamId, start: (c: CourtPlayer) => number, exclude: Set<string>) {
     const fs = this.frontSlots(team);
     for (const [c, s] of fs) {
       if (exclude.has(c.p.id) || c.role === 'S') continue;
       const u = c.role === 'MB' ? 2.2 : 3.5;
-      this.moveTo(c, { u, v: this.laneOf(c, s) }, t);
+      this.moveTo(c, { u, v: this.laneOf(c, s) }, start(c), { asap: true });
     }
     for (const [c, s] of this.backSlots(team)) {
       if (exclude.has(c.p.id) || c.role === 'S') continue;
-      this.moveTo(c, { u: 4.5, v: SLOT_V[s] * 0.8 }, t);
+      this.moveTo(c, { u: 4.5, v: SLOT_V[s] * 0.8 }, start(c), { asap: true });
     }
   }
 
@@ -633,7 +644,7 @@ class RallySim {
       const land: Local = { u: this.rng.range(DIRECT.overpassU[0], DIRECT.overpassU[1]), v: this.rng.range(-4, 4) };
       const tA = inc.tArrive + TIMING.overpassFlight;
       this.defenseBase(team, inc.tArrive + 0.2);
-      this.attackBase(opp, inc.tArrive + 0.2, new Set());
+      this.attackBase(opp, c2 => this.freeAt(c2, inc.tArrive + 0.2), new Set());
       return {
         kind: 'incoming',
         inc: {
@@ -649,9 +660,14 @@ class RallySim {
     const tUp = inc.tArrive + TIMING.passFlight + offset * TIMING.passFlightPerOffset;
     this.ballTo(this.world(team, at, 2.3), tUp, 'pass', 3.6 + offset * 0.4);
 
-    // 相手は守備の隊形、こちらは攻撃の準備
-    this.defenseBase(opp, inc.tArrive + 0.1);
-    this.attackBase(team, inc.tArrive + 0.15, new Set([c.p.id]));
+    // セッター：パスが届く範囲なら、パスを待たずにセットする位置へ走り出す（相手が打った時点で、読む時間の後）
+    const setter = this.court[team].find(x => x.role === 'S');
+    if (setter && setter !== c && offset <= SET.setterReach) {
+      this.moveTo(setter, SET_TARGET, this.moveStart(setter, inc), { asap: true });
+    }
+    // 相手は守備の隊形、こちらは攻撃の準備。触らない選手は相手が打った時点で動き出す
+    this.defenseBase(opp, inc.tArrive, true);
+    this.attackBase(team, x => this.moveStart(x, inc), new Set([c.p.id]));
     return { kind: 'ballUp', bu: { team, tPass: inc.tArrive, t: tUp, at, offset, spin, firstToucher: c.p.id } };
   }
 
@@ -1070,7 +1086,7 @@ class RallySim {
       const at: Local = { u: clamp(SET_TARGET.u + 1 + Math.abs(Math.cos(ang)) * offset, 0.5, 8), v: clamp(SET_TARGET.v + Math.sin(ang) * offset, -4.3, 4.3) };
       const tUp = tLand + TIMING.passFlight + offset * TIMING.passFlightPerOffset;
       this.ballTo(this.world(team, at, 2.3), tUp, 'pass', 3.8);
-      this.attackBase(team, tLand + 0.1, new Set([c.p.id]));
+      this.attackBase(team, x => this.freeAt(x, tLand + 0.1), new Set([c.p.id]));
       this.defenseBase(other(team), tLand);
       return { kind: 'ballUp', bu: { team, tPass: tLand, t: tUp, at, offset, spin: 0.5, firstToucher: c.p.id } };
     }
