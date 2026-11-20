@@ -1,13 +1,15 @@
 // 育成（双六）の仮の画面。見た目は第4段階で作り込む。
 // 手札から進行カードを選んで進む。止まったマスのパネル・イベントの結果と、選手の体力・怪我を見せる。
 
-import { FIXED_EVENTS } from '../grow/constants';
+import { FIXED_EVENTS, MONEY } from '../grow/constants';
+import { EQUIPMENT } from '../grow/practice';
+import { abilityRank } from './common';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Season, type StepResult } from '../grow/season';
 import type { BoardDay, Panel } from '../grow/board';
 import { gradeOf } from '../sim/player';
 import { makeBench, makeTeam } from '../sim/sample';
-import type { Player, Role, Squad } from '../sim/types';
+import type { Player, Role, Squad, TrainKey } from '../sim/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const params = new URLSearchParams(location.search);
@@ -41,7 +43,8 @@ function dayCol(d: BoardDay, here: boolean): string {
 function render() {
   const { month, day } = season.date;
   $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました）' : ''}`;
-  $('money').textContent = `お金 ${season.money}`;
+  $('money').textContent = `お金 ${season.money.toLocaleString()}円`;
+  $('gym').textContent = `体育館レベル ${season.gym}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
     `<button class="${season.policy === k ? 'on' : ''}" data-policy="${k}">${POLICY[k].name}</button>`).join('');
   for (const b of Array.from($('policy').querySelectorAll<HTMLButtonElement>('button'))) {
@@ -61,13 +64,21 @@ function render() {
     $('hand').appendChild(b);
   });
   ($('rest') as HTMLButtonElement).disabled = busy;
-  // 選手
+  // 選手：能力（段階＋数値）、体力、調子、怪我、練習指示（押すと変える）
+  const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
+  const COND = ['絶不調', '不調', '普通', '好調', '絶好調'];
   const rows = season.squad.players.map(p => {
-    const hurt = p.injuryDays > 0 ? `<span class="hurt">怪我 ${p.injuryDays}日</span>` : '';
-    return `<tr><td>${p.number}</td><td>${ROLE_NAME[bestRole(p)]}</td><td>${gradeOf(p, season.year)}年</td>
-      <td><span class="bar"><i style="width:${p.energy}%"></i></span> ${Math.round(p.energy)}</td><td>${hurt}</td></tr>`;
+    const hurt = p.injuryDays > 0 ? ` <span class="hurt">怪我${p.injuryDays}日</span>` : '';
+    const ab = KEYS.map(k => `<td>${abilityRank(p[k])}${p[k]}</td>`).join('');
+    const focus = p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus];
+    return `<tr><td>${p.number}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
+      <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}${hurt}</td><td>${COND[p.condition + 2]}</td>
+      <td><button class="small" data-pr="${p.id}">${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button></td></tr>`;
   }).join('');
-  $('squad').innerHTML = `<tr><th>背番号</th><th>ポジション</th><th>学年</th><th>体力</th><th></th></tr>${rows}`;
+  $('squad').innerHTML = `<tr><th>番</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;
+  for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pr]'))) {
+    b.onclick = () => openPractice(b.getAttribute('data-pr')!);
+  }
   $('log').innerHTML = log.slice(-30).reverse().map(l => `<div>${l}</div>`).join('');
 }
 
@@ -111,6 +122,50 @@ function openEvent() {
   $('modal').classList.remove('hidden');
 }
 
+/** 練習指示：伸ばす能力と、練習するポジション */
+function openPractice(id: string) {
+  const p = season.squad.players.find(x => x.id === id)!;
+  const draw = () => {
+    const focus: (TrainKey | 'auto')[] = ['auto', 'jump', 'power', 'speed', 'technique', 'block', 'stamina'];
+    $('modalBox').innerHTML = `<div class="text">${p.number}番の練習指示</div>
+      <div class="choices">${focus.map(f => `<button class="${p.practice.focus === f ? 'on' : 'off'}" data-f="${f}">${f === 'auto' ? 'おまかせ' : ABILITY_NAME[f]}</button>`).join('')}</div>
+      <div class="text">練習するポジション</div>
+      <div class="choices">${(Object.keys(ROLE_NAME) as Role[]).map(r => `<button class="${p.practice.position === r ? 'on' : 'off'}" data-r="${r}">${ROLE_NAME[r]}</button>`).join('')}</div>
+      <div class="choices"><button id="close">閉じる</button></div>`;
+    for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-f]'))) {
+      b.onclick = () => { p.practice.focus = b.getAttribute('data-f') as TrainKey | 'auto'; draw(); };
+    }
+    for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-r]'))) {
+      b.onclick = () => { p.practice.position = b.getAttribute('data-r') as Role; draw(); };
+    }
+    ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+  };
+  draw();
+  $('modal').classList.remove('hidden');
+}
+
+/** 買い物：機材を買う（持つと、その練習のカードが出る。体育館レベルが上がる） */
+function openShop() {
+  const draw = () => {
+    const rows = EQUIPMENT.map(e => {
+      const owned = season.equipment.includes(e.id);
+      const price = MONEY.price[e.equipment as 'basic' | 'advanced'];
+      return `<tr><td>${e.name}</td><td>${e.abilities.map(a => ABILITY_NAME[a]).join('・')}</td><td>${e.equipment === 'basic' ? '下位' : '上位'}</td>
+        <td>${price.toLocaleString()}円</td><td>${owned ? '持っている' : `<button data-buy="${e.id}" ${season.money < price ? 'disabled' : ''}>買う</button>`}</td></tr>`;
+    }).join('');
+    $('modalBox').innerHTML = `<div class="text">買い物（お金 ${season.money.toLocaleString()}円・体育館レベル ${season.gym}）</div>
+      <div style="max-height:250px;overflow-y:auto"><table id="shopTable">${rows}</table></div>
+      <div class="choices"><button id="close">閉じる</button></div>`;
+    for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-buy]'))) {
+      b.onclick = () => { season.buy(b.getAttribute('data-buy')!); log.push(`機材を買った：${PRACTICE[b.getAttribute('data-buy')!].name}`); draw(); };
+    }
+    ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+  };
+  draw();
+  $('modal').classList.remove('hidden');
+}
+
+($('shop') as HTMLButtonElement).onclick = openShop;
 ($('rest') as HTMLButtonElement).onclick = () => after(season.rest());
 ($('newYear') as HTMLButtonElement).onclick = () => {
   seed++;

@@ -199,9 +199,10 @@ describe('イベントの仕組み', () => {
       if (r.needBranch) s2.chooseBranch(0);
       else if (s2.pending && s2.pending.def.id !== 't-blue') s2.choose(0);
     }
+    const money = s2.money;
     const next = s2.choose(1);
     expect(next?.def.id).toBe('t-next');
-    expect(s2.money).toBe(100);
+    expect(s2.money).toBe(money + 100);
     s2.choose(0);
     expect(s2.pending).toBeNull();
   });

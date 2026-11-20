@@ -1,12 +1,12 @@
 // 進行カード（spec.md「練習の仕組み」）。1枚に「進む日数」と「練習の種類」が書いてある。
 // 手札は5枚。使ったら1枚引く。出やすさはチーム方針（と、後で機材）で変わる。
-// 練習の効果そのものは「練習」の段階で作る。ここでは練習の種類と、カードを使ったことを練習側に渡す口だけ。
+// 練習の効果は practice.ts。
 
 import type { Rng } from '../sim/rng';
 import type { TrainKey } from '../sim/types';
 import { HAND } from './constants';
 
-/** 機材：なし・下位・上位（機材を持っているかは「練習」の段階で） */
+/** 機材：なし・下位・上位 */
 export type Equipment = 'none' | 'basic' | 'advanced';
 
 export interface PracticeDef {
@@ -50,7 +50,7 @@ export const POLICY: Record<TeamPolicy, { name: string; abilities: TrainKey[] }>
 };
 
 /** カードの出やすさ：方針で伸びやすい能力の練習を重くする（倍率） */
-export const CARD_WEIGHTS = { base: 1, policyMul: 2.5, general: 1.5 };
+export const CARD_WEIGHTS = { base: 1, policyMul: 2.5, general: 1.5, efficient: 1.5 };
 
 export interface Card {
   days: number;
@@ -58,14 +58,32 @@ export interface Card {
 }
 
 /**
- * 1枚引く。今は機材なしの練習と総合系だけ（機材と高効率カードの条件は「練習」の段階で）
+ * 高効率カードの条件（spec.md の表）：チーム方針と、持っている機材の組み合わせ。条件を満たすと手札に出るようになる
  */
-export function drawCard(rng: Rng, policy: TeamPolicy, owned: Equipment[] = ['none']): Card {
+export const EFFICIENT: Record<string, { policy: TeamPolicy; needs: string[][] }> = {
+  // 攻撃重視 ＋（ダンベルかバーベル）＋（ジャンプボックスかジャンプ測定器）
+  uchikomi: { policy: 'attack', needs: [['dumbbell', 'barbell'], ['jumpBox', 'jumpMeter']] },
+  // 守備重視 ＋（トス練習リングかボールマシン）
+  senbon: { policy: 'defense', needs: [['tossRing', 'ballMachine']] },
+};
+
+/** 高効率カードの条件を満たしているか */
+export function efficientReady(id: string, policy: TeamPolicy, owned: string[]): boolean {
+  const c = EFFICIENT[id];
+  return !!c && c.policy === policy && c.needs.every(any => any.some(x => owned.includes(x)));
+}
+
+/**
+ * 1枚引く。機材なしの練習と総合系はいつでも出る。機材を使う練習は、その機材を持っていれば出る。
+ * 高効率カードは条件（方針＋機材）を満たせば出る
+ */
+export function drawCard(rng: Rng, policy: TeamPolicy, owned: string[] = []): Card {
   const fav = new Set(POLICY[policy].abilities);
-  const pool = PRACTICES.filter(p => p.kind !== 'efficient' && owned.includes(p.equipment));
+  const pool = PRACTICES.filter(p => p.kind === 'efficient' ? efficientReady(p.id, policy, owned) : p.equipment === 'none' || owned.includes(p.id));
   const practice = rng.weighted(pool.map(p => ({
     item: p,
-    w: p.kind === 'general' ? CARD_WEIGHTS.general : CARD_WEIGHTS.base * (p.abilities.some(a => fav.has(a)) ? CARD_WEIGHTS.policyMul : 1),
+    w: p.kind === 'general' ? CARD_WEIGHTS.general : p.kind === 'efficient' ? CARD_WEIGHTS.efficient
+      : CARD_WEIGHTS.base * (p.abilities.some(a => fav.has(a)) ? CARD_WEIGHTS.policyMul : 1),
   })))!;
   const days = HAND.minDays + Math.min(HAND.maxDays - HAND.minDays, Math.floor(rng.range(0, HAND.maxDays - HAND.minDays + 1)));
   return { days, practiceId: practice.id };

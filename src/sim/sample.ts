@@ -60,6 +60,7 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     traitProgress: {},
     stats: emptyStats(),
     career: null,
+    practice: { focus: 'auto', position: role },
     personality: null,
     middleSchool: null,
   };

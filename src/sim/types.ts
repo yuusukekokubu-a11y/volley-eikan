@@ -90,6 +90,8 @@ export interface Player extends Abilities {
   stats: CareerStats;
   /** 卒業後の進路（決まるまでは null） */
   career: string | null;
+  /** 練習指示：伸ばす能力（おまかせ＝カードどおり）と、練習するポジション */
+  practice: { focus: TrainKey | 'auto'; position: Role };
 
   // ---- 枠だけ（中身は後の段階で） ----
   personality: string | null;

@@ -53,3 +53,61 @@ export const FIXED_EVENTS: { id: string; name: string; month: number; day: numbe
   { id: 'harukou', name: '春高本戦', month: 1, day: 5, stop: true },
   { id: 'graduation', name: '卒業式', month: 3, day: 1, stop: false },
 ];
+
+/**
+ * 練習の経験（1日あたり）。経験は能力ごとの端数にたまり、1たまると能力が1上がる。
+ * 経験＝ base × 体育館レベルの倍率 × 指示との合い方 × 伸びにくさ（× 黄パネルの倍率）
+ */
+export const PRACTICE_GAIN = {
+  /** 1つの能力を伸ばす練習の、1日あたりの経験の基本量 */
+  base: 0.32,
+  /** 練習指示とカードの能力が同じ／違う／指示が「おまかせ」 */
+  match: 1.6,
+  mismatch: 0.6,
+  auto: 1.0,
+  /** 総合練習・紅白戦：6能力それぞれに入る割合 */
+  generalShare: 0.25,
+  /** 高効率カード：2つの能力それぞれに入る倍率 */
+  efficient: 1.6,
+  /** 伸びにくさ：能力が高いほど伸びにくい（倍率＝ pivot − 能力 × slope。下限 min） */
+  pivot: 1.3,
+  slope: 0.01,
+  min: 0.2,
+  /** 練習するポジションの適性の経験（1日あたり） */
+  aptitude: 0.1,
+};
+
+/** 体育館レベル：持っている機材で決まる（下位機材 basic 点・上位機材 advanced 点）。機材は壊れない */
+export const GYM = {
+  points: { basic: 1, advanced: 2 },
+  /** レベル＝ 1 ＋ 点の合計 ÷ perLevel（切り捨て） */
+  perLevel: 2,
+  /** 1レベルあたり、すべての練習の経験が増える割合 */
+  perLevelGain: 0.06,
+};
+
+/** お金（単位：円）。部費（年度の初めに入る）と、試合の勝利の報奨（後援会・OB会からの支援） */
+export const MONEY = {
+  /** 部費：年度の初めに入る額（評判による増減は第3段階で） */
+  budget: 150000,
+  /** 勝利の報奨：練習試合1勝、大会1勝（大会は勝ち進むほど roundMul 倍ずつ増える） */
+  winPractice: 5000,
+  winTournament: 10000,
+  roundMul: 1.3,
+  /** 機材の値段 */
+  price: { basic: 40000, advanced: 120000 },
+};
+
+/** 調子（-2〜+2）の日々の変わり方 */
+export const CONDITION = {
+  /** 1日に調子が変わる確率：普通の時 leaveNormal、それ以外の時 dailyChance */
+  leaveNormal: 0.04,
+  dailyChance: 0.1,
+  /** 変わる時に、普通（0）の方へ戻る確率 */
+  towardNormal: 0.75,
+  /** 安定感：普通から外れにくい（leaveNormal の倍率） */
+  stableLeave: 0.4,
+  /** ムラっ気：普通から外れやすく（leaveNormal の倍率）、戻りにくい（普通の方へ戻る確率） */
+  moodyLeave: 2.5,
+  moodyToward: 0.6,
+};
