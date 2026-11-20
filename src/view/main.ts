@@ -98,7 +98,8 @@ function advance() {
     shownScore = { ...game.score };
     viewSwapped = match.swapped;
     pb = null;
-    if (last) showMessage(pointText(last, x => TEAM_NAME[x]));
+    collectNotices();
+    if (last) showMessage(pointMessage(last));
     updateHud();
     if (stop) openStop(stop);
     else endSet();
@@ -112,8 +113,21 @@ function advance() {
   t = 0;
   counted = false;
   stopAfter = stop;
+  collectNotices();
   $('msg').classList.remove('show');
   updateHud();
+}
+
+/** 直前のラリーの後に起きた出来事の一言。相手の方針の変化は、データ分析を持っている時だけ出す */
+let lastNotices: string[] = [];
+function collectNotices() {
+  lastNotices = (game?.notices ?? [])
+    .filter(n => n.kind !== 'tactics' || n.team === OWN || managerSkills.includes('dataBunseki'))
+    .filter(n => n.kind !== 'timeout')
+    .map(n => `${TEAM_NAME[n.team]}：${n.text}`);
+}
+function pointMessage(rec: RallyRecord): string {
+  return [pointText(rec, x => TEAM_NAME[x]), ...lastNotices].join('　／　');
 }
 
 function showMessage(text: string) {
@@ -254,6 +268,7 @@ function scoutingHtml(): string {
   return `<div class="card scout"><b>相手の傾向（データ分析）</b><br>
     方針：攻撃 ${TACTIC_NAME[t.attack]}・ブロック ${TACTIC_NAME[t.block]}・レシーブ ${TACTIC_NAME[t.receive]}<br>
     エース：${ace ? `${ace.number}番` : '－'}<br>
+    監督特能：${match.oppManagerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}<br>
     選手の傾向：${styles.join('／') || '目立った傾向なし'}</div>`;
 }
 
@@ -398,7 +413,9 @@ function renderStopMain() {
   const s = currentStop!;
   $('stopLeft').innerHTML = `
     <div class="card"><div class="big">赤 ${g.score.A} - ${g.score.B} 青</div><div class="reason">${s.label}</div>
-      <div>第${g.setNumber}セット・${setsText()}</div></div>
+      <div>第${g.setNumber}セット・${setsText()}</div>
+      ${s.oppTimeout ? `<div class="opp">青が「${s.oppTimeout}」を使った：${oppSkillDesc(s.oppTimeout)}</div>` : ''}
+      ${lastNotices.length ? `<div class="hint">${lastNotices.join('<br>')}</div>` : ''}</div>
     <div class="card">タイムアウト 残り：赤 ${g.timeoutsLeft.A}回・青 ${g.timeoutsLeft.B}回<br>選手交代：${g.subsUsed.A} / 6回
       <br>監督特能：${managerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}${buffsHtml(g)}</div>
     <div class="card">${rotationHtml(g)}</div>`;
@@ -422,11 +439,18 @@ function renderStopMain() {
 function buffsHtml(g: SetGame): string {
   if (!g.buffs.length) return '';
   const list = g.buffs.map(b => {
-    const who = b.targetId ? `→青${g.teams.B.rotation.find(s => s.player.id === b.targetId)?.player.number ?? ''}番` : '';
+    // かかっている側：自分たちへの上乗せは使った側、相手へのものは使われた側
+    const user = MANAGER_SKILLS[Object.keys(MANAGER_SKILLS).find(id => MANAGER_SKILLS[id].name === b.name) ?? '']?.opp ? (b.team === 'A' ? 'B' : 'A') : b.team;
+    const target = b.targetId ? `→${TEAM_NAME[b.team]}${[...g.teams[b.team].rotation.map(s => s.player)].find(p => p.id === b.targetId)?.number ?? ''}番` : '';
     const left = Number.isFinite(b.left) ? `（残り${b.left}ラリー）` : '（このセットの間）';
-    return `${b.name}${who}${left}`;
+    return `${TEAM_NAME[user as TeamId]}の${b.name}${target}${left}`;
   });
   return `<br><span class="hint">効いている：${list.join('・')}</span>`;
+}
+
+function oppSkillDesc(name: string): string {
+  const s = Object.values(MANAGER_SKILLS).find(x => x.name === name);
+  return s ? `${s.desc}（次の5ラリー）` : '';
 }
 
 /** 勝負勘：次の1ラリーだけ方針を変える（1試合1回。タイムアウトの回数は使わない） */
@@ -500,7 +524,9 @@ function chooseOut() {
 function chooseIn(outId: string) {
   const g = game!;
   const ins = g.validSubs().filter(s => s.outId === outId).map(s => s.inId);
-  $('stopRight').innerHTML = '<div class="hint">入る選手を選ぶ</div><div class="picklist" id="ins"></div>';
+  const pinch = new Set(g.validPinch().filter(s => s.outId === outId).map(s => s.inId));
+  $('stopRight').innerHTML = `<div class="hint">入る選手を選ぶ</div><div class="picklist" id="ins"></div>
+    ${pinch.size ? '<div class="hint">サーブの間だけ（ピンチサーバー）：サイドアウトしたら自動で戻る。交代は2回分</div><div class="picklist" id="pins"></div>' : ''}`;
   for (const id of ins) {
     const p = g.bench[OWN].find(x => x.id === id)!;
     const b = document.createElement('button');
@@ -508,6 +534,13 @@ function chooseIn(outId: string) {
     b.textContent = `${p.number} ${ROLE_NAME[bestRole(p)]}`;
     b.onclick = () => { g.substitute(outId, id); renderStopMain(); };
     $('ins').appendChild(b);
+    if (pinch.has(id)) {
+      const pb2 = document.createElement('button');
+      pb2.className = 'pick';
+      pb2.textContent = `${p.number}（サーブの間だけ）`;
+      pb2.onclick = () => { g.pinchServe(outId, id); renderStopMain(); };
+      $('pins').appendChild(pb2);
+    }
   }
   setButtons([['戻る', chooseOut], ['やめる', renderStopMain]]);
 }
@@ -529,7 +562,7 @@ function tick(now: number) {
     if (fr.point && !counted) {
       counted = true;
       shownScore = { ...game.score };
-      showMessage(pointText(pb.rec, x => TEAM_NAME[x]));
+      showMessage(pointMessage(pb.rec));
       updateHud();
     }
     r3.draw(fr);
