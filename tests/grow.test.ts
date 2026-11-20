@@ -69,20 +69,39 @@ describe('双六の進行', () => {
       const r = s.useCard(0);
       if (r.needBranch) { s.chooseBranch(0); continue; }
       expect(s.hand).toHaveLength(HAND.size);
-      // 定期イベントで止まった時だけ、書いてある日数より短い
+      // 大会で止まった時だけ、書いてある日数より短い
       if (s.day - before !== days) expect(s.panelAt(s.day).kind).toBe('fixed');
+      while (s.pending) s.choose(0);
     }
   });
 
-  it('定期イベントのマスでは、残りの日数があっても止まる', () => {
+  it('大会のマスでは、残りの日数があっても止まる', () => {
     const s = new Season({ seed: 2, squad: squad(), events: [] });
-    const target = indexOf(4, 7); // 入学式
+    const target = indexOf(6, 1); // インターハイ予選
     while (s.day < target) {
       const r = s.useCard(0);
       if (r.needBranch) s.chooseBranch(0);
       expect(s.day).toBeLessThanOrEqual(target);
     }
     expect(s.day).toBe(target);
+  });
+
+  it('大会以外の行事（入学式など）は止まらず、通り過ぎても起きる', () => {
+    let passed = false;
+    for (let seed = 1; seed <= 30 && !passed; seed++) {
+      const s = new Season({ seed, squad: squad(), events: TEST_EVENTS });
+      const target = indexOf(4, 7); // 入学式
+      while (s.day < target) {
+        const r = s.useCard(0);
+        if (r.needBranch) s.chooseBranch(0);
+        while (s.pending) s.choose(0);
+      }
+      if (s.day > target) {
+        passed = true;
+        expect(s.flags.entered).toBe(true);
+      }
+    }
+    expect(passed).toBe(true);
   });
 
   it('分かれ道では止まって道を選び、選んだ道のマスを通る', () => {
@@ -187,13 +206,17 @@ describe('イベントの仕組み', () => {
     expect(s2.pending).toBeNull();
   });
 
-  it('定期イベントのマスでは、その行事のイベントが起きる', () => {
-    const s = new Season({ seed: 2, squad: squad(), events: TEST_EVENTS });
-    while (s.day < indexOf(4, 7)) {
-      const r = s.useCard(0);
-      if (r.needBranch) s.chooseBranch(0);
-      if (s.pending) s.choose(0);
+  it('行事のマスに止まった時も、その行事のイベントが起きる', () => {
+    let landed = false;
+    for (let seed = 1; seed <= 40 && !landed; seed++) {
+      const s = new Season({ seed, squad: squad(), events: TEST_EVENTS });
+      while (s.day < indexOf(4, 7)) {
+        const r = s.useCard(0);
+        if (r.needBranch) s.chooseBranch(0);
+        while (s.pending) s.choose(0);
+      }
+      if (s.day === indexOf(4, 7)) { landed = true; expect(s.flags.entered).toBe(true); }
     }
-    expect(s.flags.entered).toBe(true);
+    expect(landed).toBe(true);
   });
 });

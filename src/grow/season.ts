@@ -50,6 +50,8 @@ export class Season {
   money: number;
   /** 選択肢を待っているイベント */
   pending: PendingEvent | null = null;
+  /** 続けて起きるのを待っているイベント（通り過ぎた行事など。今のイベントが終わったら順に出す） */
+  private queue: PendingEvent[] = [];
   /** 分かれ道で止まっている時の、残りの日数と使ったカード */
   private branchWait: { left: number; card: Card | null } | null = null;
   readonly events: EventDef[];
@@ -117,8 +119,10 @@ export class Season {
   choose(index?: number): PendingEvent | null {
     if (!this.pending) throw new Error('イベントは起きていません');
     const w = this.world();
-    this.pending = resolveEvent(this.pending, w, this.events, index);
+    this.pending = resolveEvent(this.pending, w, this.events, index) ?? this.queue.shift() ?? null;
     this.money = w.money;
+    // 待っていたイベントが選択肢のないものなら、すぐに効果をかけて次へ
+    if (this.pending && !this.pending.def.choices?.length) return this.choose();
     return this.pending;
   }
 
@@ -158,8 +162,12 @@ export class Season {
       moved++;
       left--;
       this.passDay(card, notes);
-      // 定期イベントのマスでは止まる
-      if (this.panelAt(this.day).kind === 'fixed') break;
+      const here = this.panelAt(this.day);
+      if (here.kind === 'fixed') {
+        // 大会は必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる（止まった時は下の land で起きる）
+        if (FIXED_EVENTS.find(f => f.id === here.fixedId)?.stop) break;
+        if (left > 0) this.land(here, card, notes);
+      }
     }
     this.afterDays(moved, card, notes);
     const panel = this.panelAt(this.day);
@@ -229,6 +237,8 @@ export class Season {
   private trigger(t: { panel?: Panel['kind']; fixed?: string }, empty: string, notes: string[]): PendingEvent | null {
     const ev = pickEvent(this.events, t, this.world(), this.rng);
     if (!ev) { notes.push(empty); return null; }
+    // 前のイベントが選択肢を待っていれば、その後に出す
+    if (this.pending) { this.queue.push(ev); return ev; }
     this.pending = ev;
     // 選択肢のないイベントは、すぐに効果をかける
     if (!ev.def.choices?.length) this.choose();

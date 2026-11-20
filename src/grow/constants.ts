@@ -40,15 +40,16 @@ export const YELLOW_BONUS = 1.5;
 
 /**
  * 決まった日の行事（定期イベントのパネル）。日付は仮。中身（文章・効果）は「イベントの中身の作り方」で入れる。
+ * stop：大会は試合をするので必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる。
  * 大会の日程は第3段階の「大会」で決め直す
  */
-export const FIXED_EVENTS: { id: string; name: string; month: number; day: number }[] = [
-  { id: 'entrance', name: '入学式', month: 4, day: 7 },
-  { id: 'physical', name: '身体測定', month: 4, day: 15 },
-  { id: 'interhighPrelim', name: 'インターハイ予選', month: 6, day: 1 },
-  { id: 'interhigh', name: 'インターハイ本戦', month: 7, day: 28 },
-  { id: 'camp', name: '合宿', month: 8, day: 10 },
-  { id: 'harukouPrelim', name: '春高予選', month: 11, day: 1 },
-  { id: 'harukou', name: '春高本戦', month: 1, day: 5 },
-  { id: 'graduation', name: '卒業式', month: 3, day: 1 },
+export const FIXED_EVENTS: { id: string; name: string; month: number; day: number; stop: boolean }[] = [
+  { id: 'entrance', name: '入学式', month: 4, day: 7, stop: false },
+  { id: 'physical', name: '身体測定', month: 4, day: 15, stop: false },
+  { id: 'interhighPrelim', name: 'インターハイ予選', month: 6, day: 1, stop: true },
+  { id: 'interhigh', name: 'インターハイ本戦', month: 7, day: 28, stop: true },
+  { id: 'camp', name: '合宿', month: 8, day: 10, stop: false },
+  { id: 'harukouPrelim', name: '春高予選', month: 11, day: 1, stop: true },
+  { id: 'harukou', name: '春高本戦', month: 1, day: 5, stop: true },
+  { id: 'graduation', name: '卒業式', month: 3, day: 1, stop: false },
 ];
