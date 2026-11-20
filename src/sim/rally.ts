@@ -243,7 +243,7 @@ class RallySim {
         const w = this.world(team, l);
         this.placements.push({
           playerId: c.p.id, team, number: c.p.number, role: c.role, height: c.p.height,
-          pos: { x: round(w.x), y: round(w.y) },
+          pos: { x: round(w.x), y: round(w.y) }, ...(c.p.hand === 'left' ? { hand: 'left' as const } : {}),
         });
       }
     }
@@ -405,6 +405,27 @@ class RallySim {
       u: clamp(contact.u + du * offset, RECORD.minU, COURT.halfLength),
       v: clamp(contact.v + dv * offset, -COURT.halfWidth, COURT.halfWidth),
     };
+  }
+
+  /**
+   * 片手で打つ時の体の立ち位置（記録用）：ボールが打つ腕の側の肩の上に来るよう、打つ腕と反対側へずらす。
+   * ネットを向いた時の左が v の＋なので、右利きは体を＋側（ボールが右肩の上）へ
+   */
+  private hitStand(c: CourtPlayer, body: Local): Local {
+    const side = c.p.hand === 'left' ? -1 : 1;
+    return { u: body.u, v: clamp(body.v + side * RECORD.hitSide, -COURT.halfWidth - 1, COURT.halfWidth + 1) };
+  }
+
+  /**
+   * 記録の上の立ち位置だけを直す（判定の位置は変えない）。その時刻に向けた最後の移動の行き先を書き換える。
+   * 近い時刻の移動がなければ、短い移動を足す
+   */
+  private restand(c: CourtPlayer, stand: Local, t: number) {
+    const moves = this.events.filter((e): e is Extract<RallyEvent, { type: 'move' }> => e.type === 'move' && e.playerId === c.p.id && e.t <= t + 1e-9);
+    const last = moves[moves.length - 1];
+    const to = this.w2(c.team, stand);
+    if (last && last.t + last.dur >= t - 0.6) last.to = to;
+    else this.events.push({ type: 'move', t: round(Math.max(0, t - 0.35)), playerId: c.p.id, to, dur: 0.2 });
   }
 
   private jump(c: CourtPlayer, t: number, dur: number, heightM: number, oneFoot = false) {
@@ -576,9 +597,10 @@ class RallySim {
     const bad = miss + Math.abs(timing) * R_.timingToMiss;
 
     // 打つ位置と高さ。ジャンプ系はジャンプの頂点からずれると低い所で打つ
+    // フローターは立ったまま、打つ腕の側の肩の上で打つ（ボールを打つ腕の側へずらす。結果には影響しない）
     const plan: Local = jump
       ? { u: R_.takeoffU - R_.drift[type], v: start.v }
-      : { u: start.u - 0.3, v: start.v };
+      : { u: start.u - 0.3, v: start.v - (server.p.hand === 'left' ? -1 : 1) * RECORD.hitSide };
     const contactL: Local = { u: plan.u + Math.cos(tossDir) * tossErr, v: plan.v + Math.sin(tossDir) * tossErr };
     const standing = standingReachCm(server.p.height) / 100;
     const jumpM = jumpHeightCm(this.eff(server, 'jump')) / 100 * R_.jumpRatio[type];
@@ -613,7 +635,7 @@ class RallySim {
         v: plan.v + Math.sin(tossDir) * tossErr * k,
       };
       const tA = tTake - R_.approachDur[type];
-      this.moveTo(server, take, tA, { asap: true, dur: Math.max(0.15, tTake - tA) });
+      this.moveTo(server, take, tA, { asap: true, dur: Math.max(0.15, tTake - tA), stand: this.hitStand(server, take) });
       this.jump(server, tTake, TIMING.jumpTotal, jumpM);
     }
     this.act(server, tc, 'serve', contactL, z, { serveType: type });
@@ -1029,6 +1051,11 @@ class RallySim {
     const contact = this.contactAt(attacker, tTake, jumpM, tHit);
     const hitZ = contact.cm / 100;
     this.act(tosser, bu.t, 'set', bu.at, setZ, { setType, secondary: !useSetter });
+    // 記録の立ち位置：ボールは額の上の少し前なので、体はトスを上げる向きと反対へ少し下がる
+    {
+      const dl = Math.hypot(hit.u - bu.at.u, hit.v - bu.at.v) || 1;
+      this.restand(tosser, { u: bu.at.u - ((hit.u - bu.at.u) / dl) * RECORD.setBehind, v: bu.at.v - ((hit.v - bu.at.v) / dl) * RECORD.setBehind }, bu.t);
+    }
     this.ballTo(this.world(team, hit, hitZ), tHit, 'set', Math.max(hitZ, this.hitCm(attacker) / 100) + TIMING.setApexAbove[setType] + (useSetter ? 0 : 0.5));
 
     // バックアタックはアタックラインを踏まない所で踏み切る
@@ -1039,10 +1066,10 @@ class RallySim {
     if (setType === 'timeDiff') {
       // 時間差：速攻の時刻に踏み込んで止まり（フェイク）、その場でもう一度跳ぶ
       const tFake = plan.tTakeNom + plan.late;
-      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tFake - plan.tA) });
+      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tFake - plan.tA), stand: this.hitStand(attacker, take) });
       this.act(attacker, tFake, 'fakeJump', take, 0);
     } else {
-      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tTake - plan.tA) });
+      this.moveTo(attacker, take, plan.tA, { asap: true, dur: Math.max(0.15, tTake - plan.tA), stand: this.hitStand(attacker, take) });
     }
     for (const [c] of fs) {
       if (c === attacker || c === tosser || c.role === 'S' || c.role === 'L') continue;
@@ -1211,11 +1238,15 @@ class RallySim {
     // 打ち手・ブロッカーの動き
     this.jump(a, sb.tTake, TIMING.jumpTotal, sb.jumpM, sb.setType === 'broad');
     // ブロード：空中で横に流れて、打つ点の下へ
-    if (sb.setType === 'broad') this.moveTo(a, { u: sb.hit.u + 0.1, v: sb.hit.v }, sb.tTake, { dur: TIMING.jumpTotal * BROAD.driftDurRatio });
+    if (sb.setType === 'broad') {
+      const to = { u: sb.hit.u + 0.1, v: sb.hit.v };
+      this.moveTo(a, to, sb.tTake, { dur: TIMING.jumpTotal * BROAD.driftDurRatio, stand: this.hitStand(a, to) });
+    }
     const tBlock = sb.tHit + 0.04;
     for (const b of blockers) {
       this.jump(b.cp, sb.tHit - TIMING.blockRise, TIMING.blockTotal, (b.reachCm - standingReachCm(b.cp.p.height)) / 100);
-      this.act(b.cp, tBlock, 'block', b.spot, b.reachCm / 100);
+      // 手はネットの上へ少し突き出す（記録の手の位置。判定は変えない）
+      this.act(b.cp, tBlock, 'block', { u: RECORD.blockHandsU, v: b.spot.v }, b.reachCm / 100);
     }
     const info: ActionInfo = {
       setType: sb.setType, hitHeight: round(maxCm), contactHeight: round(hitCm), blockReach: blockers.length ? round(maxReach) : undefined,
@@ -1370,6 +1401,7 @@ class RallySim {
     const z = standingReachCm(setter.p.height) / 100 + DUMP.jumpM;
     this.jump(setter, bu.t - TIMING.jumpRise * 0.6, TIMING.jumpTotal * 0.6, DUMP.jumpM);
     this.act(setter, bu.t, 'dump', bu.at, z);
+    this.restand(setter, this.hitStand(setter, bu.at), bu.t);
     this.touches++;
     this.load[setter.p.id] += LOAD.set;
     // 相手の前衛がセッターの正面にいれば、ブロックで止められることがある（読み＝ブロック能力）
@@ -1381,7 +1413,7 @@ class RallySim {
       this.moveTo(blocker, spot, bu.t - 0.4, { dur: 0.25 });
       const reach = this.blockCm(blocker) / 100;
       this.jump(blocker, bu.t - TIMING.blockRise + 0.1, TIMING.blockTotal, Math.max(0.1, reach - standingReachCm(blocker.p.height) / 100));
-      this.act(blocker, bu.t + 0.1, 'block', spot, reach);
+      this.act(blocker, bu.t + 0.1, 'block', { u: RECORD.blockHandsU, v: spot.v }, reach);
       this.ballTo(this.world(opp, { u: 0.15, v: laneDef }, reach - 0.1), bu.t + 0.1, 'tip');
       const back: Local = { u: this.rng.range(0.3, 2.0), v: clamp(bu.at.v + this.rng.range(-1, 1), -4.3, 4.3) };
       this.land(this.world(team, back), bu.t + 0.1 + TIMING.blockReboundFlight, 'blockRebound');
@@ -1448,7 +1480,7 @@ class RallySim {
       if (sb.setType === 'timeDiff' && c.role === 'MB' && this.rng.chance(bite)) {
         this.moveTo(c, { u: 0.3, v: clamp(-LANE_V.quick, -4, 4) }, sb.tSet, { dur: 0.2 });
         this.jump(c, tQuick - TIMING.blockRise, TIMING.blockTotal, (this.blockCm(c) - standingReachCm(c.p.height)) / 100);
-        this.act(c, tQuick, 'block', this.pos.get(c.p.id)!, this.blockCm(c) / 100);
+        this.act(c, tQuick, 'block', { u: RECORD.blockHandsU, v: this.pos.get(c.p.id)!.v }, this.blockCm(c) / 100);
         return;
       }
       const sp = this.eff(c, 'speed');
@@ -1511,7 +1543,8 @@ class RallySim {
     const jumpM = (jumpHeightCm(this.eff(a, 'jump')) / 100) * (APPROACH.standingRatio + (1 - APPROACH.standingRatio) * DIRECT.approachQ);
     const contact = this.contactAt(a, tTake, jumpM, tHit);
     const hitZ = contact.cm / 100;
-    this.moveTo(a, { u: hit.u + 0.3, v: hit.v }, inc.tArrive - inc.flight + 0.2, { arriveBy: tTake });
+    const dTake = { u: hit.u + 0.3, v: hit.v };
+    this.moveTo(a, dTake, inc.tArrive - inc.flight + 0.2, { arriveBy: tTake, stand: this.hitStand(a, dTake) });
     this.ballTo(this.world(team, hit, hitZ), tHit, inc.ballKind, Math.max(inc.apex ?? 0, hitZ + 0.3));
     this.defenseBase(other(team), inc.tArrive - inc.flight + 0.2);
     return {

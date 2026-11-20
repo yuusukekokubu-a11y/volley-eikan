@@ -160,7 +160,8 @@ export class FigureB implements Figure {
         const g = handGoal(this.upper, c.pos, from, side);
         m.position.lerp(g, c.w);
       };
-      if (c.hands === 'hit') put(this.handN, 0);
+      // 片手で打つ時は打つ腕（右利きは右手＝手前の手、左利きは左手）
+      if (c.hands === 'hit') put(pl.left ? this.handF : this.handN, 0);
       else {
         const s = handSpread(c.action);
         put(this.handN, s);

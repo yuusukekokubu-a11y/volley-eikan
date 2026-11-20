@@ -151,6 +151,8 @@ export function targetJoints(pl: PlayerFrame, runPhase: number): Joints {
 
   const [armN, armF] = arms ?? [PI * 0.15, PI * 0.15];
   const [elbowN, elbowF] = elbowAngles(pl);
+  // 腕のポーズは「手前の腕＝右腕＝打つ腕」で書いてある。左利きは左右を入れ替える
+  if (pl.left) return { pitch, lean, thighN, kneeN, thighF, kneeF, armN: armF, armF: armN, elbowN: elbowF, elbowF: elbowN };
   return { pitch, lean, thighN, kneeN, thighF, kneeF, armN, armF, elbowN, elbowF };
 }
 

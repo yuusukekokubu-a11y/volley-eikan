@@ -230,6 +230,8 @@ export interface PlayerPlacement {
   role: Role;
   height: number;
   pos: Vec2;
+  /** 左利き（打つ腕。描画で打つ手を決める）。右利きなら省く */
+  hand?: 'left';
 }
 
 export interface RallyRecord {

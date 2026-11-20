@@ -52,6 +52,8 @@ export interface PlayerFrame {
   jumpT: number;
   /** 片足で踏み切るジャンプ（ブロード） */
   oneFoot?: boolean;
+  /** 左利き（打つ腕が左。描画で腕の左右を入れ替える） */
+  left?: boolean;
   contact?: Contact;
   /** 動作のために向く点（世界座標）。なければ移動の方向かボールの方を向く */
   faceTo?: Vec2;
@@ -230,7 +232,7 @@ export class Playback {
       return {
         id, team: pl.team, number: pl.number, role: pl.role, height: pl.height / 100,
         x: pos.x, y: pos.y, z, pose, poseT, vx, vy, ax, ay, speed: Math.hypot(vx, vy), moveKind, moveT,
-        jumpPhase, jumpT, contact, faceTo, ...(oneFoot ? { oneFoot } : {}),
+        jumpPhase, jumpT, contact, faceTo, ...(oneFoot ? { oneFoot } : {}), ...(pl.hand === 'left' ? { left: true } : {}),
       };
     });
 

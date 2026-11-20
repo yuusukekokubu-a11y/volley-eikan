@@ -49,3 +49,29 @@ describe('記録：ボールを受ける選手の立ち位置と移動', () => {
     expect(early / total).toBeGreaterThan(0.5);
   });
 });
+
+describe('記録：片手で打つ時の体の位置', () => {
+  it('スパイク・サーブは、ボールが打つ腕の側の肩の上に来る（体は打つ腕と反対側にずれる）', async () => {
+    const { Playback } = await import('../src/view/playback');
+    const { RECORD } = await import('../src/sim/constants');
+    let n = 0;
+    const serveDiff: number[] = [];
+    for (const r of recs) {
+      const pb = new Playback(r);
+      for (const e of r.events) {
+        if (e.type !== 'action' || (e.action !== 'spike' && e.action !== 'serve')) continue;
+        const pl = r.placements.find(p => p.playerId === e.playerId)!;
+        const fr = pb.frame(e.t).players.find(p => p.id === e.playerId)!;
+        // ネットを向いた時の右が＋になる向きで、体から見たボールの左右
+        const right = (pl.team === 'A' ? -1 : 1) * (e.pos.y - fr.y);
+        const want = pl.hand === 'left' ? -RECORD.hitSide : RECORD.hitSide;
+        // スパイクはぴったり。サーブはトスのずれの分だけばらつくので平均で見る
+        if (e.action === 'spike') expect(Math.abs(right - want), `${e.action} ${e.playerId}`).toBeLessThan(0.02);
+        else serveDiff.push(right - want);
+        n++;
+      }
+    }
+    expect(n).toBeGreaterThan(100);
+    expect(Math.abs(serveDiff.reduce((a, b) => a + b, 0) / serveDiff.length)).toBeLessThan(0.05);
+  });
+});
