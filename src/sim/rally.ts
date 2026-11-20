@@ -289,7 +289,9 @@ class RallySim {
     const row = { front: c.front, teammates: this.court[c.team].map(m => ({ p: m.p, front: m.front })) };
     // チームにかかっている一時的な上下（タイムアウトの監督特能など）
     let buff = 0;
-    for (const e of this.input.teams[c.team].buffs ?? []) if (e.ability === k && set.has(e.scene)) buff += e.delta;
+    for (const e of this.input.teams[c.team].buffs ?? []) {
+      if (e.ability === k && set.has(e.scene) && (!e.playerId || e.playerId === c.p.id)) buff += e.delta;
+    }
     // 信頼度による上乗せ（試合中だけ、全能力）
     return Math.max(0, this.eff(c, k) + traitDelta(c.p, k, set, row, facing) + buff + trustDelta(c.p));
   }

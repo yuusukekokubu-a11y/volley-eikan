@@ -5,6 +5,7 @@
 
 import { FATIGUE } from '../sim/constants';
 import { Match, type BestOf } from '../sim/game';
+import { aceOf, MANAGER_MAX, MANAGER_SKILL_IDS, MANAGER_SKILLS } from '../sim/manager';
 import { OWN, SetGame, type StopInfo } from '../sim/match';
 import { makeBench, makeTeam } from '../sim/sample';
 import { TRAITS } from '../sim/traits';
@@ -19,8 +20,8 @@ const SPEEDS = [1, 2, 4];
 const TEAM_NAME: Record<TeamId, string> = { A: '赤', B: '青' };
 /** 見せ方の段階：フル（全ラリーを再生）／結果のみ（止まる場面まで一気に進む）。ハイライトは次の段階で */
 type ShowMode = 'full' | 'result';
-/** 試作用：自チームの監督が持っている監督特能（仮） */
-const DEMO_MANAGER_SKILLS = ['geki', 'tatenaoshi', 'serveKuzushi'];
+/** 試作用：自チームの監督が持っている監督特能（試合前の画面で3つまで選ぶ。獲得・失効は育成の段階で） */
+let managerSkills = ['geki', 'tatenaoshi', 'shoubukan'];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const r3 = new Render3D($('view').querySelector('canvas')!, 'male');
@@ -46,7 +47,7 @@ let counted = false;
 
 function newMatch() {
   match = new Match({
-    gender, bestOf, seed: matchSeed++, managerSkills: DEMO_MANAGER_SKILLS,
+    gender, bestOf, seed: matchSeed++, managerSkills,
     teams: { A: makeTeam(1, 'A', gender, 55), B: makeTeam(2, 'B', gender, 55) },
     bench: { A: makeBench(1, 'A', gender, 55), B: makeBench(2, 'B', gender, 55) },
   });
@@ -237,6 +238,25 @@ function openLineup() {
   renderLineup();
 }
 
+const TACTIC_NAME: Record<string, string> = Object.fromEntries(TACTIC_OPTS.flatMap(o => o.items));
+
+/** データ分析（監督特能）：相手の方針・エース・主な選手の緑（行動の傾向）を見せる */
+function scoutingHtml(): string {
+  if (!managerSkills.includes('dataBunseki')) return '';
+  const opp = match.lineups.B;
+  const ace = aceOf(opp);
+  const players = [...opp.rotation.map(s => s.player), ...(opp.libero ? [opp.libero] : [])];
+  const styles = players.flatMap(p => {
+    const names = p.traits.map(id => TRAITS[id]).filter(d => d?.kind === 'style').map(d => d!.name);
+    return names.length ? [`${p.number}番 ${names.join('・')}`] : [];
+  });
+  const t = opp.tactics;
+  return `<div class="card scout"><b>相手の傾向（データ分析）</b><br>
+    方針：攻撃 ${TACTIC_NAME[t.attack]}・ブロック ${TACTIC_NAME[t.block]}・レシーブ ${TACTIC_NAME[t.receive]}<br>
+    エース：${ace ? `${ace.number}番` : '－'}<br>
+    選手の傾向：${styles.join('／') || '目立った傾向なし'}</div>`;
+}
+
 function renderLineup() {
   const team = match.lineups[OWN];
   const pre = match.phase === 'pregame';
@@ -260,7 +280,12 @@ function renderLineup() {
       <button class="zone" data-rot="1">並びを回す</button></div></div>`;
   const benchRows = match.bench[OWN].map(p =>
     `<button class="pick ${sel({ kind: 'bench', id: p.id })}" data-bench="${p.id}">${p.number} ${ROLE_NAME[bestRole(p)]}${tiredHtml(p, match.fatigue) ? '（疲れ）' : ''}</button>`).join('');
-  $('stopRight').innerHTML = `
+  const skillRow = pre
+    ? `<div class="brow"><span class="label">監督特能</span><span class="picklist">${MANAGER_SKILL_IDS.map(id =>
+      `<button class="pick ${managerSkills.includes(id) ? 'on' : ''}" data-ms="${id}">${MANAGER_SKILLS[id].name}</button>`).join('')}</span></div>
+      <div class="hint">監督特能は試作用に3つまで選べる（獲得・失効は育成の段階で作る）</div>`
+    : `<div class="hint">監督特能：${managerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}</div>`;
+  $('stopRight').innerHTML = `${skillRow}${scoutingHtml()}
     <div class="hint">2か所を続けて押すと入れ替え（控え→位置・リベロで先発と交代）</div>
     <div class="brow"><span class="label">控え</span><span class="picklist">${benchRows || '－'}</span></div>
     ${tacticsHtml(team.tactics)}
@@ -274,7 +299,7 @@ function renderLineup() {
     b.onclick = () => {
       bestOf = Number(b.getAttribute('data-best')) as BestOf;
       match = new Match({
-        gender, bestOf, seed: matchSeed++, managerSkills: DEMO_MANAGER_SKILLS,
+        gender, bestOf, seed: matchSeed++, managerSkills,
         teams: { ...match.lineups }, bench: { ...match.bench },
       });
       updateHud();
@@ -297,6 +322,16 @@ function renderLineup() {
     match.setTactics(toTactics({ ...match.lineups[OWN].tactics, [k]: v }));
     renderLineup();
   });
+  // 監督特能（試作用）：押すと持つ／外す。3つまで
+  for (const b of Array.from($('stopRight').querySelectorAll<HTMLButtonElement>('button[data-ms]'))) {
+    b.onclick = () => {
+      const id = b.getAttribute('data-ms')!;
+      if (managerSkills.includes(id)) managerSkills = managerSkills.filter(x => x !== id);
+      else if (managerSkills.length < MANAGER_MAX) managerSkills = [...managerSkills, id];
+      match.setManagerSkills(managerSkills);
+      renderLineup();
+    };
+  }
 
   const box = $('stopButtons');
   box.innerHTML = '';
@@ -364,7 +399,8 @@ function renderStopMain() {
   $('stopLeft').innerHTML = `
     <div class="card"><div class="big">赤 ${g.score.A} - ${g.score.B} 青</div><div class="reason">${s.label}</div>
       <div>第${g.setNumber}セット・${setsText()}</div></div>
-    <div class="card">タイムアウト 残り：赤 ${g.timeoutsLeft.A}回・青 ${g.timeoutsLeft.B}回<br>選手交代：${g.subsUsed.A} / 6回</div>
+    <div class="card">タイムアウト 残り：赤 ${g.timeoutsLeft.A}回・青 ${g.timeoutsLeft.B}回<br>選手交代：${g.subsUsed.A} / 6回
+      <br>監督特能：${managerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}${buffsHtml(g)}</div>
     <div class="card">${rotationHtml(g)}</div>`;
   const team = g.teams[OWN];
   const rows = team.rotation.map(sl => playerLine(sl.player, sl.role, g.fatigue)).join('')
@@ -376,9 +412,38 @@ function renderStopMain() {
   box.append(
     btn(`タイムアウト（残り${g.timeoutsLeft[OWN]}）`, chooseSkill, !g.canTimeout()),
     btn('選手交代', chooseOut, g.validSubs().length === 0),
+    ...(g.canInstinct() ? [btn('勝負勘', chooseInstinct)] : []),
     btn('試合に戻る', closeStop, false, 'sub'),
     modeButton(renderStopMain),
   );
+}
+
+/** いま効いている監督特能（タイムアウトの効果は残りラリー数、エース対策は相手） */
+function buffsHtml(g: SetGame): string {
+  if (!g.buffs.length) return '';
+  const list = g.buffs.map(b => {
+    const who = b.targetId ? `→青${g.teams.B.rotation.find(s => s.player.id === b.targetId)?.player.number ?? ''}番` : '';
+    const left = Number.isFinite(b.left) ? `（残り${b.left}ラリー）` : '（このセットの間）';
+    return `${b.name}${who}${left}`;
+  });
+  return `<br><span class="hint">効いている：${list.join('・')}</span>`;
+}
+
+/** 勝負勘：次の1ラリーだけ方針を変える（1試合1回。タイムアウトの回数は使わない） */
+function chooseInstinct() {
+  const cur: Tactics = { ...game!.teams[OWN].tactics };
+  const draw = () => {
+    $('stopRight').innerHTML = '<div class="hint">勝負勘：次の1ラリーだけ方針を変える（1試合1回）</div>' + tacticsHtml(cur);
+    bindTactics($('stopRight'), (k, v) => {
+      (cur as unknown as Record<string, string>)[k] = v;
+      draw();
+    });
+  };
+  draw();
+  setButtons([
+    ['決定', () => { game!.instinct(toTactics(cur)); renderStopMain(); }],
+    ['やめる', renderStopMain],
+  ]);
 }
 
 /** タイムアウト：監督特能を1つ選ぶ → 方針を変える */
@@ -387,7 +452,8 @@ function chooseSkill() {
   for (const s of game!.timeoutChoices()) {
     const b = document.createElement('button');
     b.className = 'pick';
-    b.innerHTML = `${s.name}<br><small>${s.desc}</small>`;
+    const ace = s.oppAceOnly ? aceOf(game!.teams.B) : undefined;
+    b.innerHTML = `${s.name}<br><small>${s.desc}${ace ? `（今なら青${ace.number}番）` : ''}</small>`;
     b.onclick = () => chooseTactics(s.id);
     $('skills').appendChild(b);
   }

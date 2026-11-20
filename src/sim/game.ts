@@ -4,6 +4,7 @@
 // 疲れは次のセットに持ち越し、セットの間に少し回復する。
 
 import { FATIGUE, MATCH } from './constants';
+import { MANAGER_MAX } from './manager';
 import { OWN, SetGame } from './match';
 import type { MatchLine } from './player';
 import { Rng } from './rng';
@@ -45,7 +46,9 @@ export class Match {
   lines: Record<string, MatchLine> = {};
   private rng: Rng;
   private seed: number;
-  private managerSkills: string[];
+  managerSkills: string[];
+  /** 勝負勘（1試合1回）を使ったか */
+  instinctUsed = false;
 
   constructor(o: MatchOptions) {
     this.gender = o.gender;
@@ -118,6 +121,12 @@ export class Match {
     this.bench[OWN] = [...this.bench[OWN].filter(p => p.id !== benchId), ...(out ? [out] : [])];
   }
 
+  /** 監督特能を持たせる（試作用。試合の前だけ。3つまで） */
+  setManagerSkills(ids: string[]) {
+    if (this.phase !== 'pregame') throw new Error('試合の前だけ変えられます');
+    this.managerSkills = ids.slice(0, MANAGER_MAX);
+  }
+
   setTactics(t: Partial<Tactics>) {
     this.editable();
     this.lineups[OWN] = { ...this.lineups[OWN], tactics: { ...this.lineups[OWN].tactics, ...t } };
@@ -137,7 +146,7 @@ export class Match {
     this.current = new SetGame({
       gender: this.gender, seed: this.seed * 100 + n, setNumber: n, finalSet: final, serving,
       teams: { A: this.lineups.A, B: this.lineups.B }, bench: this.bench,
-      managerSkills: this.managerSkills, fatigue: this.fatigue,
+      managerSkills: this.managerSkills, fatigue: this.fatigue, instinctAvailable: !this.instinctUsed,
     });
     this.phase = 'set';
     return this.current;
@@ -148,6 +157,7 @@ export class Match {
     const g = this.current;
     if (!g || !g.over) throw new Error('セットはまだ終わっていません');
     this.results.push({ A: g.score.A, B: g.score.B, winner: g.winner! });
+    if (g.instinctUsed) this.instinctUsed = true;
     this.setsWon[g.winner!]++;
     for (const [id, role] of Object.entries(g.played)) {
       const l = (this.lines[id] ??= { sets: 0, roles: {}, kills: 0, blockPoints: 0, aces: 0 });

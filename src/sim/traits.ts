@@ -84,6 +84,8 @@ export interface StatEffect {
   ability: AbilityKey;
   delta: StageDelta;
   target?: EffectTarget;
+  /** チームにかける一時的な上下（監督特能）で、その選手1人だけに効かせる時（エース対策） */
+  playerId?: string;
 }
 
 export type TraitColor = 'blue' | 'red' | 'gold' | 'other';

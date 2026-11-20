@@ -3,7 +3,7 @@
 // 停止・タイムアウト・交代は自チーム（A）だけ。相手チーム（B）の采配は未決事項。
 
 import { ACE_AURA, FATIGUE, MATCH } from './constants';
-import { MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
+import { aceOf, MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
 import { simulateRally } from './rally';
 import { hasTrait, traitExtra, type StatEffect } from './traits';
 import type { Gender, Player, RallyRecord, Role, Tactics, TeamId, TeamState } from './types';
@@ -40,9 +40,12 @@ export interface SetOptions {
   managerSkills?: string[];
   /** 前のセットから持ち越す疲れ */
   fatigue?: Record<string, number>;
+  /** 監督特能「勝負勘」をまだ使えるか（1試合1回。試合の側が管理する） */
+  instinctAvailable?: boolean;
 }
 
-interface ActiveBuff { team: TeamId; effects: StatEffect[]; left: number; name: string }
+/** かかっている一時的な上下。targetId はエース対策で効かせている選手 */
+export interface ActiveBuff { team: TeamId; effects: StatEffect[]; left: number; name: string; targetId?: string }
 
 const other = (t: TeamId): TeamId => (t === 'A' ? 'B' : 'A');
 
@@ -79,6 +82,11 @@ export class SetGame {
   /** このセットの得点（スパイク・ブロック・サービスエース）。通算成績用 */
   scored: Record<string, { kills: number; blockPoints: number; aces: number }> = {};
   readonly managerSkills: string[];
+  /** 勝負勘をまだ使えるか、このセットで使ったか */
+  instinctAvailable: boolean;
+  instinctUsed = false;
+  /** 勝負勘で変える前の方針（次のラリーが終わったら戻す） */
+  private instinctRevert: Tactics | null = null;
   private seed: number;
   private starters: Record<TeamId, Set<string>>;
   private periodicDone = new Set<number>();
@@ -101,6 +109,14 @@ export class SetGame {
       B: new Set(o.teams.B.rotation.map(s => s.player.id)),
     };
     this.pending = this.periodicStop();
+    this.instinctAvailable = o.instinctAvailable ?? true;
+    // 常時系の監督特能：勝負師は最終セットの間ずっと効く
+    for (const id of this.managerSkills) {
+      const s = MANAGER_SKILLS[id];
+      if (s?.kind === 'passive' && s.passive === 'finalSet' && this.finalSet && s.own) {
+        this.buffs.push({ team: OWN, effects: s.own, left: Infinity, name: s.name });
+      }
+    }
   }
 
   get over(): boolean {
@@ -186,6 +202,11 @@ export class SetGame {
     // タイムアウトの効果は決まったラリー数で切れる
     for (const b of this.buffs) b.left--;
     this.buffs = this.buffs.filter(b => b.left > 0);
+    // 勝負勘：変えた方針は1ラリーだけ。終わったら元に戻す
+    if (this.instinctRevert) {
+      this.teams[OWN] = { ...this.teams[OWN], tactics: this.instinctRevert };
+      this.instinctRevert = null;
+    }
     // 金特「エースの風格」：持ち主が決めると、チーム全体に小さな上乗せ（かかっていれば掛け直す）
     const scorer = rec.keyPlayerId;
     if (scorer && SCORING.has(rec.reason)) {
@@ -255,8 +276,28 @@ export class SetGame {
     const s = MANAGER_SKILLS[skillId];
     this.timeoutsLeft[team]--;
     if (s.own) this.buffs.push({ team, effects: s.own, left: MATCH.timeoutRallies, name: s.name });
-    if (s.opp) this.buffs.push({ team: other(team), effects: s.opp, left: MATCH.timeoutRallies, name: s.name });
+    if (s.opp) {
+      // エース対策：相手のエース1人だけに効かせる（タイムアウトを取った時点の前衛で一番攻撃力の高い選手）
+      const ace = s.oppAceOnly ? aceOf(this.teams[other(team)]) : undefined;
+      const effects = ace ? s.opp.map(e => ({ ...e, playerId: ace.id })) : s.opp;
+      this.buffs.push({ team: other(team), effects, left: MATCH.timeoutRallies, name: s.name, ...(ace ? { targetId: ace.id } : {}) });
+    }
     if (tactics) this.teams[team] = { ...this.teams[team], tactics: { ...this.teams[team].tactics, ...tactics } };
+  }
+
+  // ---------------- 勝負勘 ----------------
+
+  /** 勝負勘を使えるか：持っていて、この試合でまだ使っていない（止まっている時に使う） */
+  canInstinct(): boolean {
+    return !this.over && this.instinctAvailable && !this.instinctUsed && this.managerSkills.some(id => MANAGER_SKILLS[id]?.kind === 'instinct');
+  }
+
+  /** 勝負勘：次の1ラリーだけ方針を変える（タイムアウトの回数は使わない） */
+  instinct(tactics: Partial<Tactics>) {
+    if (!this.canInstinct()) throw new Error('勝負勘は使えません');
+    this.instinctUsed = true;
+    this.instinctRevert = { ...this.teams[OWN].tactics };
+    this.teams[OWN] = { ...this.teams[OWN], tactics: { ...this.teams[OWN].tactics, ...tactics } };
   }
 
   // ---------------- 選手交代 ----------------
