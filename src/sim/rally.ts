@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD, DEFENSE_RETURN,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -778,6 +778,13 @@ class RallySim {
     const team = inc.team;
     const opp = other(team);
     const ts = this.input.teams[team];
+    // 攻撃を終えた側：ボールがネットを越えた（ブロックに当たって相手側へ行った）時点から、守備の持ち場へ集まり始める。
+    // フォローに寄っていた選手も戻り始める（サーブは打った時点で、跳ね返りは自分のボールなので除く）
+    if (inc.kind !== 'serve' && inc.kind !== 'blockBack') {
+      const t0 = inc.tArrive - inc.flight;
+      const slow = inc.kind === 'freeball' || inc.kind === 'overpass';
+      this.defenseBase(opp, t0 + (slow ? inc.flight * DEFENSE_RETURN.slowCrossRatio : DEFENSE_RETURN.fastCross));
+    }
     let cands = this.court[team].filter(c => this.timeToReact(c, inc.tArrive, inc.flight) > 0);
     if (inc.kind === 'serve') {
       const recv = this.receivers(team);

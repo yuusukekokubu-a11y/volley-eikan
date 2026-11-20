@@ -75,3 +75,23 @@ describe('記録：片手で打つ時の体の位置', () => {
     expect(Math.abs(serveDiff.reduce((a, b) => a + b, 0) / serveDiff.length)).toBeLessThan(0.05);
   });
 });
+
+describe('記録：攻撃を終えた側の動き出し', () => {
+  it('スパイクがネットを越えたら、相手が触る前に、攻撃した側が守備の持ち場へ動き始める', () => {
+    let n = 0, early = 0;
+    for (const r of recs) {
+      const acts = r.events.filter((e): e is Extract<RallyEvent, { type: 'action' }> => e.type === 'action');
+      acts.forEach((e, k) => {
+        if (e.action !== 'spike') return;
+        const team = r.placements.find(p => p.playerId === e.playerId)!.team;
+        const next = acts.slice(k + 1).find(x => x.action !== 'block');
+        if (!next || r.placements.find(p => p.playerId === next.playerId)!.team === team) return;
+        n++;
+        const mates = new Set(r.placements.filter(p => p.team === team && p.playerId !== e.playerId).map(p => p.playerId));
+        if (r.events.some(m => m.type === 'move' && mates.has(m.playerId) && m.t > e.t && m.t < next.t - 0.05)) early++;
+      });
+    }
+    expect(n).toBeGreaterThan(50);
+    expect(early / n).toBeGreaterThan(0.9);
+  });
+});

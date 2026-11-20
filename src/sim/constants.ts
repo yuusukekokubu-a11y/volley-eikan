@@ -632,3 +632,9 @@ export const BROAD = {
   /** 空中で横に流れる時間（ジャンプ全体に対する割合） */
   driftDurRatio: 0.55,
 };
+
+/**
+ * 攻撃を終えた側が守備の持ち場へ集まり始める時刻。ボールがネットを越えた時点（打った時刻からの秒）。
+ * 返球・つなぎ（ゆっくり飛ぶボール）は、飛んでいる時間のこの割合でネットを越える
+ */
+export const DEFENSE_RETURN = { fastCross: 0.08, slowCrossRatio: 0.45 };
