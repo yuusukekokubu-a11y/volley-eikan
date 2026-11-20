@@ -1,56 +1,51 @@
 import { describe, expect, it } from 'vitest';
-import { COACH, MATCH } from '../src/sim/constants';
-import { Match } from '../src/sim/game';
+import { MATCH } from '../src/sim/constants';
 import { SetGame } from '../src/sim/match';
 import { makeBench, makeTeam } from '../src/sim/sample';
 
-const newSet = (seed: number, o: { coach?: boolean; opp?: string[]; finalSet?: boolean } = {}) => new SetGame({
-  gender: 'male', seed, serving: 'A', finalSet: o.finalSet, coach: o.coach, oppManagerSkills: o.opp ?? ['geki', 'tatenaoshi', 'aceTaisaku'],
+const newSet = (seed: number, o: { coach?: boolean; finalSet?: boolean } = {}) => new SetGame({
+  gender: 'male', seed, serving: 'A', finalSet: o.finalSet, coach: o.coach,
   teams: { A: makeTeam(1, 'A', 'male', 60), B: makeTeam(2, 'B', 'male', 50) },
   bench: { A: makeBench(1, 'A', 'male', 60), B: makeBench(2, 'B', 'male', 50) },
 });
 
-describe('相手チームの采配', () => {
-  it('相手のタイムアウトは、失点した直後に、連続失点か終盤の負けている時だけ。大差でリードしている時は取らない。1セット2回まで', () => {
-    let taken = 0;
-    for (let s = 1; s <= 40; s++) {
+describe('相手チームの采配（交代だけ）', () => {
+  it('相手はタイムアウトを取らず、監督特能も方針も変わらない。交代は6回まで', () => {
+    for (let s = 1; s <= 30; s++) {
       const g = newSet(s);
+      const tactics = { ...g.teams.B.tactics };
       g.takePendingStop();
       while (!g.over) {
-        const before = g.timeoutsLeft.B;
-        const { rec, stop } = g.next();
-        if (g.timeoutsLeft.B === before) continue;
-        taken++;
-        expect(stop?.oppTimeout).toBeTruthy();
-        expect(rec.winner).toBe('A');
-        const lead = g.score.B - g.score.A;
-        expect(lead).toBeLessThan(COACH.noTimeoutLead);
-        const streak = g.lostStreak.B === g.streakNeeded('B');
-        const late = Math.max(g.score.A, g.score.B) >= COACH.lateFrom.normal && -lead >= COACH.lateBehind && before === MATCH.timeouts;
-        expect(streak || late).toBe(true);
-      }
-      expect(g.timeoutsLeft.B).toBeGreaterThanOrEqual(0);
-    }
-    expect(taken).toBeGreaterThan(10);
-  });
-
-  it('采配しない設定なら、相手はタイムアウトも交代もしない', () => {
-    const g = newSet(3, { coach: false });
-    while (!g.over) g.next();
-    expect(g.timeoutsLeft.B).toBe(MATCH.timeouts);
-    expect(g.subsUsed.B).toBe(0);
-  });
-
-  it('相手の交代は6回まで。使った監督特能は持っているものか基本効果', () => {
-    for (let s = 1; s <= 30; s++) {
-      const g = newSet(s, { opp: ['aceTaisaku'] });
-      while (!g.over) {
         g.next();
-        // こちらは監督特能を持っていないので、かかっている効果はすべて相手が使ったもの
-        for (const b of g.buffs) expect(['エース対策', '基本効果']).toContain(b.name);
+        expect(g.buffs.every(b => b.team === 'A' || ['サーブ崩し', 'エース対策'].includes(b.name))).toBe(true);
       }
+      expect(g.timeoutsLeft.B).toBe(MATCH.timeouts);
+      expect(g.teams.B.tactics).toEqual(tactics);
       expect(g.subsUsed.B).toBeLessThanOrEqual(MATCH.substitutions);
     }
+  });
+
+  it('相手は疲れた先発を同じポジションの控えと替え、回復したら戻す', () => {
+    const B = makeTeam(2, 'B', 'male', 50);
+    const tired = B.rotation.find(x => x.role === 'OH')!.player.id;
+    const g = new SetGame({
+      gender: 'male', seed: 9, serving: 'A', fatigue: { [tired]: 0.6 },
+      teams: { A: makeTeam(1, 'A', 'male', 60), B }, bench: { A: makeBench(1, 'A', 'male', 60), B: makeBench(2, 'B', 'male', 50) },
+    });
+    g.next();
+    const pair = g.pairs.B.find(p => p.starterId === tired && !p.pinch);
+    expect(pair).toBeTruthy();
+    expect(g.teams.B.rotation.some(x => x.player.id === tired)).toBe(false);
+    // 控えのまま休めば回復し、先発に戻る
+    let back = false;
+    for (let i = 0; i < 80 && !g.over && !back; i++) { g.next(); back = g.teams.B.rotation.some(x => x.player.id === tired); }
+    expect(back).toBe(true);
+  });
+
+  it('采配しない設定なら、相手は交代もしない', () => {
+    const g = newSet(3, { coach: false });
+    while (!g.over) g.next();
+    expect(g.subsUsed.B).toBe(0);
   });
 
   it('ピンチサーバー：サーブの間だけ入り、サイドアウトで先発が戻る（交代2回分）', () => {
@@ -77,20 +72,4 @@ describe('相手チームの采配', () => {
     expect(g.validPinch()).toEqual([]);
   });
 
-  it('相手の監督特能は、試作用にランダムで0〜3つ（同じ種なら同じ）', () => {
-    const mk = (seed: number) => new Match({
-      gender: 'male', bestOf: 3, seed,
-      teams: { A: makeTeam(1, 'A', 'male', 55), B: makeTeam(2, 'B', 'male', 55) },
-      bench: { A: makeBench(1, 'A', 'male', 55), B: makeBench(2, 'B', 'male', 55) },
-    });
-    const counts = new Set<number>();
-    for (let s = 1; s <= 30; s++) {
-      const m = mk(s);
-      expect(m.oppManagerSkills.length).toBeLessThanOrEqual(3);
-      expect(new Set(m.oppManagerSkills).size).toBe(m.oppManagerSkills.length);
-      expect(mk(s).oppManagerSkills).toEqual(m.oppManagerSkills);
-      counts.add(m.oppManagerSkills.length);
-    }
-    expect(counts.size).toBeGreaterThan(2);
-  });
 });

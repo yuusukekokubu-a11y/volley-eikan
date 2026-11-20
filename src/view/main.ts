@@ -118,13 +118,10 @@ function advance() {
   updateHud();
 }
 
-/** 直前のラリーの後に起きた出来事の一言。相手の方針の変化は、データ分析を持っている時だけ出す */
+/** 直前のラリーの後に起きた出来事の一言（相手の交代・ピンチサーバー、ピンチサーバーが戻った） */
 let lastNotices: string[] = [];
 function collectNotices() {
-  lastNotices = (game?.notices ?? [])
-    .filter(n => n.kind !== 'tactics' || n.team === OWN || managerSkills.includes('dataBunseki'))
-    .filter(n => n.kind !== 'timeout')
-    .map(n => `${TEAM_NAME[n.team]}：${n.text}`);
+  lastNotices = (game?.notices ?? []).map(n => `${TEAM_NAME[n.team]}：${n.text}`);
 }
 function pointMessage(rec: RallyRecord): string {
   return [pointText(rec, x => TEAM_NAME[x]), ...lastNotices].join('　／　');
@@ -146,7 +143,7 @@ function updateHud() {
   $('setInfo').textContent = `${setPart}　${setsText()}（${match.bestOf}セットマッチ）`;
   const dots = (n: number) => '●'.repeat(n) + '○'.repeat(Math.max(0, 2 - n));
   $('toA').textContent = game ? `赤 TO ${dots(game.timeoutsLeft.A)}` : '';
-  $('toB').textContent = game ? `青 TO ${dots(game.timeoutsLeft.B)}` : '';
+  $('toB').textContent = '';
   $('btnMode').textContent = mode === 'full' ? 'フル' : '結果のみ';
 }
 
@@ -268,7 +265,6 @@ function scoutingHtml(): string {
   return `<div class="card scout"><b>相手の傾向（データ分析）</b><br>
     方針：攻撃 ${TACTIC_NAME[t.attack]}・ブロック ${TACTIC_NAME[t.block]}・レシーブ ${TACTIC_NAME[t.receive]}<br>
     エース：${ace ? `${ace.number}番` : '－'}<br>
-    監督特能：${match.oppManagerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}<br>
     選手の傾向：${styles.join('／') || '目立った傾向なし'}</div>`;
 }
 
@@ -414,9 +410,8 @@ function renderStopMain() {
   $('stopLeft').innerHTML = `
     <div class="card"><div class="big">赤 ${g.score.A} - ${g.score.B} 青</div><div class="reason">${s.label}</div>
       <div>第${g.setNumber}セット・${setsText()}</div>
-      ${s.oppTimeout ? `<div class="opp">青が「${s.oppTimeout}」を使った：${oppSkillDesc(s.oppTimeout)}</div>` : ''}
       ${lastNotices.length ? `<div class="hint">${lastNotices.join('<br>')}</div>` : ''}</div>
-    <div class="card">タイムアウト 残り：赤 ${g.timeoutsLeft.A}回・青 ${g.timeoutsLeft.B}回<br>選手交代：${g.subsUsed.A} / 6回
+    <div class="card">タイムアウト 残り：${g.timeoutsLeft.A}回<br>選手交代：${g.subsUsed.A} / 6回
       <br>監督特能：${managerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}${buffsHtml(g)}</div>
     <div class="card">${rotationHtml(g)}</div>`;
   const team = g.teams[OWN];
@@ -446,11 +441,6 @@ function buffsHtml(g: SetGame): string {
     return `${TEAM_NAME[user as TeamId]}の${b.name}${target}${left}`;
   });
   return `<br><span class="hint">効いている：${list.join('・')}</span>`;
-}
-
-function oppSkillDesc(name: string): string {
-  const s = Object.values(MANAGER_SKILLS).find(x => x.name === name);
-  return s ? `${s.desc}（次の5ラリー）` : '';
 }
 
 /** 勝負勘：次の1ラリーだけ方針を変える（1試合1回。タイムアウトの回数は使わない） */

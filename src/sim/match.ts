@@ -3,7 +3,7 @@
 // 停止・タイムアウト・交代は自チーム（A）だけ。相手チーム（B）の采配は未決事項。
 
 import { ACE_AURA, FATIGUE, MATCH } from './constants';
-import { coachDecide, type PointLog } from './coach';
+import { coachDecide } from './coach';
 import { aceOf, MANAGER_SKILLS, timeoutChoices, type ManagerSkill } from './manager';
 import { simulateRally } from './rally';
 import { hasTrait, traitExtra, type StatEffect } from './traits';
@@ -11,7 +11,7 @@ import type { Gender, Player, RallyRecord, Role, Tactics, TeamId, TeamState } fr
 
 export const OWN: TeamId = 'A';
 
-export type StopReason = 'periodic' | 'streak' | 'oppTimeout';
+export type StopReason = 'periodic' | 'streak';
 
 export interface StopInfo {
   reason: StopReason;
@@ -19,14 +19,12 @@ export interface StopInfo {
   label: string;
   /** コートチェンジと同時（最終セットの8点） */
   courtChange?: boolean;
-  /** 相手がタイムアウトを取った（使った監督特能の名前） */
-  oppTimeout?: string;
 }
 
 /** 試合中の出来事の一言（相手の交代・方針の変更、ピンチサーバーが戻った、など） */
 export interface Notice {
   team: TeamId;
-  kind: 'sub' | 'pinch' | 'pinchBack' | 'tactics' | 'timeout';
+  kind: 'sub' | 'pinch' | 'pinchBack';
   text: string;
 }
 
@@ -54,9 +52,7 @@ export interface SetOptions {
   fatigue?: Record<string, number>;
   /** 監督特能「勝負勘」をまだ使えるか（1試合1回。試合の側が管理する） */
   instinctAvailable?: boolean;
-  /** 相手チームの監督特能 */
-  oppManagerSkills?: string[];
-  /** 相手チームが采配するか（既定は する） */
+  /** 相手チームが采配（交代）するか（既定は する） */
   coach?: boolean;
 }
 
@@ -65,10 +61,6 @@ export interface ActiveBuff { team: TeamId; effects: StatEffect[]; left: number;
 
 const other = (t: TeamId): TeamId => (t === 'A' ? 'B' : 'A');
 
-/** 方針の名前（相手の方針の変化を一言で出す用） */
-const TACTIC_NAMES: Record<string, string> = {
-  ace: 'エース中心', balance: 'バランス', quick: '速攻中心', bunch: 'バンチ', spread: 'スプレッド', dedicate: 'デディケート', front: '前寄り', back: '後ろ寄り',
-};
 
 /** 自分で決めた得点（スパイク・フェイント・ブロックアウト・ブロック・サービスエース） */
 const SCORING = new Set<string>(['kill', 'tipKill', 'blockOut', 'blockKill', 'ace']);
@@ -103,10 +95,7 @@ export class SetGame {
   /** このセットの得点（スパイク・ブロック・サービスエース）。通算成績用 */
   scored: Record<string, { kills: number; blockPoints: number; aces: number }> = {};
   readonly managerSkills: string[];
-  readonly oppManagerSkills: string[];
   readonly coachOn: boolean;
-  /** 1ラリーごとの得点の記録（相手の判断に使う） */
-  log: PointLog[] = [];
   /** 直前のラリーの後に起きた出来事（相手の交代・方針の変更など）。next() のたびに作り直す */
   notices: Notice[] = [];
   /** 勝負勘をまだ使えるか、このセットで使ったか */
@@ -137,21 +126,14 @@ export class SetGame {
     };
     this.pending = this.periodicStop();
     this.instinctAvailable = o.instinctAvailable ?? true;
-    this.oppManagerSkills = o.oppManagerSkills ?? [];
     this.coachOn = o.coach ?? true;
-    // 常時系の監督特能：勝負師は最終セットの間ずっと効く（両チーム）
-    for (const team of ['A', 'B'] as TeamId[]) {
-      for (const id of this.managerSkillsOf(team)) {
-        const s = MANAGER_SKILLS[id];
-        if (s?.kind === 'passive' && s.passive === 'finalSet' && this.finalSet && s.own) {
-          this.buffs.push({ team, effects: s.own, left: Infinity, name: s.name });
-        }
+    // 常時系の監督特能：勝負師は最終セットの間ずっと効く（監督特能はこちらだけ）
+    for (const id of this.managerSkills) {
+      const s = MANAGER_SKILLS[id];
+      if (s?.kind === 'passive' && s.passive === 'finalSet' && this.finalSet && s.own) {
+        this.buffs.push({ team: OWN, effects: s.own, left: Infinity, name: s.name });
       }
     }
-  }
-
-  managerSkillsOf(team: TeamId): string[] {
-    return team === OWN ? this.managerSkills : this.oppManagerSkills;
   }
 
   get over(): boolean {
@@ -190,16 +172,15 @@ export class SetGame {
       const str = this.streakStop();
       // 定期の停止と連続失点が同時なら、両方の理由を出す
       stop = per && str ? { ...per, label: `${per.label}・${str.label}` } : per ?? str;
-      // 相手の采配（タイムアウト・交代）。相手がタイムアウトを取ったら、こちらも止まる
-      const opp = this.coachOn ? this.runCoach(other(OWN), rec.winner) : null;
-      if (opp) stop = stop ? { ...stop, label: `${stop.label}・${opp.label}`, oppTimeout: opp.oppTimeout } : opp;
+      // 相手の采配（交代だけ）
+      if (this.coachOn) this.runCoach(other(OWN));
     }
     return { rec, stop };
   }
 
-  /** 相手の監督の判断を実行する。タイムアウトを取ったら、その停止を返す */
-  private runCoach(team: TeamId, lastWinner: TeamId): StopInfo | null {
-    const dec = coachDecide(this, team, lastWinner);
+  /** 相手の監督の判断（交代だけ）を実行する */
+  private runCoach(team: TeamId) {
+    const dec = coachDecide(this, team);
     const num = (id: string) => [...this.teams[team].rotation.map(s => s.player), ...this.bench[team]].find(p => p.id === id)?.number;
     for (const sub of dec.subs) {
       const outN = num(sub.outId), inN = num(sub.inId);
@@ -213,15 +194,6 @@ export class SetGame {
         this.notices.push({ team, kind: 'sub', text: `交代 ${outN}番 → ${inN}番` });
       }
     }
-    if (!dec.timeout) return null;
-    const s = MANAGER_SKILLS[dec.timeout.skillId];
-    this.timeout(dec.timeout.skillId, dec.timeout.tactics, team);
-    if (dec.timeout.tactics) {
-      const names: Record<string, string> = { attack: '攻撃', block: 'ブロック', receive: 'レシーブ' };
-      const text = Object.entries(dec.timeout.tactics).map(([k, v]) => `${names[k]}：${TACTIC_NAMES[v as string] ?? v}`).join('・');
-      this.notices.push({ team, kind: 'tactics', text: `方針を変えた（${text}）` });
-    }
-    return { reason: 'oppTimeout', label: `相手のタイムアウト（${s.name}）`, oppTimeout: s.name };
   }
 
   private teamForRally(t: TeamId): TeamState {
@@ -236,9 +208,6 @@ export class SetGame {
     const w = rec.winner;
     const l = other(w);
     const prevServing = this.serving;
-    // 得点の記録（相手の判断用）：最後の攻撃のトスの種類も残す
-    const lastAtk = [...rec.events].reverse().find(e => e.type === 'action' && (e.action === 'spike' || e.action === 'tip'));
-    this.log.push({ winner: w, reason: rec.reason, key: rec.keyPlayerId, setType: lastAtk?.type === 'action' ? lastAtk.info?.setType : undefined });
     this.score[w]++;
     this.lostStreak[l]++;
     // 出た選手と得点を集める
@@ -328,7 +297,7 @@ export class SetGame {
     return null;
   }
 
-  /** 連続失点で止まる（相手はタイムアウトを考える）数。点数帯と点差で決まる */
+  /** 連続失点で止まる数。点数帯と点差で決まる */
   streakNeeded(team: TeamId = OWN): number {
     const table = this.finalSet ? MATCH.finalStreakStops : MATCH.streakStops;
     const top = Math.max(this.score.A, this.score.B);
@@ -340,8 +309,8 @@ export class SetGame {
 
   // ---------------- タイムアウト ----------------
 
-  timeoutChoices(team: TeamId = OWN): ManagerSkill[] {
-    return timeoutChoices(this.managerSkillsOf(team));
+  timeoutChoices(): ManagerSkill[] {
+    return timeoutChoices(this.managerSkills);
   }
 
   canTimeout(team: TeamId = OWN): boolean {
@@ -351,7 +320,8 @@ export class SetGame {
   /** タイムアウトを取り、監督特能を1つ発動する。方針（作戦）の変更もここでできる */
   timeout(skillId: string, tactics?: Partial<Tactics>, team: TeamId = OWN) {
     if (!this.canTimeout(team)) throw new Error('タイムアウトは残っていません');
-    const choices = this.timeoutChoices(team).map(s => s.id);
+    if (team !== OWN) throw new Error('タイムアウトはこちらだけ（相手は取らない）');
+    const choices = this.timeoutChoices().map(s => s.id);
     if (!choices.includes(skillId)) throw new Error(`使えない監督特能です: ${skillId}`);
     const s = MANAGER_SKILLS[skillId];
     this.timeoutsLeft[team]--;

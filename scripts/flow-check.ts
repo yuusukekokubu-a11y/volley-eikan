@@ -22,7 +22,6 @@ for (const g of ['male', 'female'] as const) {
       gender: g, seed: i, serving: i % 2 ? 'A' : 'B',
       teams: { A: makeTeam(100 + i, 'A', g, 55), B: makeTeam(500 + i, 'B', g, 55) },
       bench: { A: makeBench(100 + i, 'A', g, 55), B: makeBench(500 + i, 'B', g, 55) },
-      oppManagerSkills: [],
     });
     sets++;
     while (!set.over) {
