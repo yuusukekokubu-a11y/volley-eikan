@@ -638,3 +638,6 @@ export const BROAD = {
  * 返球・つなぎ（ゆっくり飛ぶボール）は、飛んでいる時間のこの割合でネットを越える
  */
 export const DEFENSE_RETURN = { fastCross: 0.08, slowCrossRatio: 0.45 };
+
+/** リベロ：フロントゾーンで2本目を上げる時はアンダーハンド（公式ルール）。精度が少し落ち、触る高さは腰の前 */
+export const LIBERO = { underhandErr: 1.15, underhandZ: 0.8 };

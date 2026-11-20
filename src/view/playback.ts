@@ -203,7 +203,9 @@ export class Playback {
       for (const a of this.actions.get(id)!) {
         // ジャンプ系のサーブは、スパイクと同じ腕振りで打つ
         const jumpServe = a.action === 'serve' && !!a.info?.serveType && a.info.serveType !== 'float';
-        const w = jumpServe ? POSE_WINDOW.spike : POSE_WINDOW[a.action];
+        // アンダーハンドのトス（リベロがフロントゾーンで上げる）は、レシーブと同じ腕の形で上げる
+        const act: ActionType = a.action === 'set' && a.info?.underhand ? 'dig' : a.action;
+        const w = jumpServe ? POSE_WINDOW.spike : POSE_WINDOW[act];
         if (!w) continue;
         const dive = isDive(a);
         // 移動 → 着いてからポーズ：構え始めは「その動作に向けた移動が終わった時刻」より前にしない
@@ -219,14 +221,14 @@ export class Playback {
           faceTo = this.faceTarget(a);
         }
         // 触る瞬間、手を触る点に寄せる
-        const hands = HANDS[a.action];
+        const hands = HANDS[act];
         if (hands) {
           const inStart = Math.max(a.t - CONTACT_IN, Math.min(start, a.t - 0.1));
           let cw = 0;
           if (t >= inStart && t < a.t) cw = smooth((t - inStart) / (a.t - inStart));
           else if (t >= a.t && t <= a.t + CONTACT_HOLD) cw = 1;
           else if (t > a.t + CONTACT_HOLD && t < a.t + CONTACT_HOLD + CONTACT_OUT) cw = 1 - smooth((t - a.t - CONTACT_HOLD) / CONTACT_OUT);
-          if (cw > (contact?.w ?? 0)) contact = { pos: a.pos, w: cw, hands, action: a.action };
+          if (cw > (contact?.w ?? 0)) contact = { pos: a.pos, w: cw, hands, action: act };
         }
       }
       return {

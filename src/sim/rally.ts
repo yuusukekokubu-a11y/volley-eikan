@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD, DEFENSE_RETURN,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD, DEFENSE_RETURN, LIBERO,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -67,6 +67,8 @@ interface BallUp {
   offset: number;
   spin: number;
   firstToucher: string;
+  /** 上がったボールの頂点の高さ（記録用。アンダーハンドで受ける時に、落ちてくる高さを直すのに使う） */
+  apex: number;
 }
 
 interface SetBall {
@@ -899,7 +901,7 @@ class RallySim {
     // 相手は守備の隊形、こちらは攻撃の準備。触らない選手は相手が打った時点で動き出す
     this.defenseBase(opp, inc.tArrive, true);
     this.attackBase(team, x => this.moveStart(x, inc), new Set([c.p.id]));
-    return { kind: 'ballUp', bu: { team, tPass: inc.tArrive, t: tUp, at, offset, spin, firstToucher: c.p.id } };
+    return { kind: 'ballUp', bu: { team, tPass: inc.tArrive, t: tUp, at, offset, spin, firstToucher: c.p.id, apex: 3.6 + offset * 0.4 } };
   }
 
   // ============================================================
@@ -1016,7 +1018,21 @@ class RallySim {
     if (choice && isQuickType(choice.type)) ssc.push('setQuick');
     if (choice && choice.lane < bu.at.v - 0.5) ssc.push('setBack');
     const tossSkill = this.skill(tosser, ssc) * (useSetter ? aptitudeFactor(tosser.p, 'S') : SET.secondarySkill);
-    const errScale = SET.errBase * (1 + bu.offset * SET.errOffsetK + bu.spin * SET.errSpinK) * Math.max(0.2, SET.skillPivot - tossSkill / 100);
+    // リベロはフロントゾーン（アタックラインよりネット側）ではアンダーハンドで上げる
+    // （オーバーハンドで上げると、味方がネットより高い位置で攻撃できないため）。アンダーハンドは少し精度が落ちる
+    const underhand = tosser.role === 'L' && bu.at.u < COURT.attackLine;
+    if (underhand) {
+      // 記録：上がったボールは腰の前まで落ちてきてから触る（時刻は変えず、高さだけ直す）
+      const last = this.ball[this.ball.length - 1];
+      if (last && Math.abs(last.t1 - bu.t) < 1e-3) {
+        this.ball.pop();
+        this.ballPos = last.from;
+        this.ballT = last.t0;
+        this.ballTo(this.world(team, bu.at, LIBERO.underhandZ), bu.t, last.kind, bu.apex);
+      }
+    }
+    const errScale = SET.errBase * (1 + bu.offset * SET.errOffsetK + bu.spin * SET.errSpinK) * Math.max(0.2, SET.skillPivot - tossSkill / 100)
+      * (underhand ? LIBERO.underhandErr : 1);
     const setError = Math.abs(this.rng.normal()) * errScale;
     this.touches++;
     this.load[tosser.p.id] += LOAD.set;
@@ -1024,7 +1040,7 @@ class RallySim {
 
     if (!choice || setError >= SET.setFault) {
       // トスミス：ボールが続かない
-      this.act(tosser, bu.t, 'set', bu.at, setZ, { secondary: !useSetter });
+      this.act(tosser, bu.t, 'set', bu.at, underhand ? LIBERO.underhandZ : setZ, { secondary: !useSetter, ...(underhand ? { underhand } : {}) });
       const away: Local = { u: bu.at.u + this.rng.range(-1, 3), v: bu.at.v + this.rng.range(-4, 4) };
       this.land(this.world(team, away), bu.t + 1.0, 'deflect', setZ + 1.5);
       return this.point(opp, 'receiveError', bu.t + 1.0, tosser.p.id);
@@ -1057,7 +1073,7 @@ class RallySim {
     const jumpM = (jumpHeightCm(this.eff(attacker, 'jump')) / 100) * (APPROACH.standingRatio + (1 - APPROACH.standingRatio) * plan.q);
     const contact = this.contactAt(attacker, tTake, jumpM, tHit);
     const hitZ = contact.cm / 100;
-    this.act(tosser, bu.t, 'set', bu.at, setZ, { setType, secondary: !useSetter });
+    this.act(tosser, bu.t, 'set', bu.at, underhand ? LIBERO.underhandZ : setZ, { setType, secondary: !useSetter, ...(underhand ? { underhand } : {}) });
     // 記録の立ち位置：ボールは額の上の少し前なので、体はトスを上げる向きと反対へ少し下がる
     {
       const dl = Math.hypot(hit.u - bu.at.u, hit.v - bu.at.v) || 1;
@@ -1615,7 +1631,7 @@ class RallySim {
       this.ballTo(this.world(team, at, 2.3), tUp, 'pass', 3.8);
       this.attackBase(team, x => this.freeAt(x, tLand + 0.1), new Set([c.p.id]));
       this.defenseBase(other(team), tLand);
-      return { kind: 'ballUp', bu: { team, tPass: tLand, t: tUp, at, offset, spin: 0.5, firstToucher: c.p.id } };
+      return { kind: 'ballUp', bu: { team, tPass: tLand, t: tUp, at, offset, spin: 0.5, firstToucher: c.p.id, apex: 3.8 } };
     }
     this.land(this.world(team, land), tLand, 'blockRebound');
     return this.point(other(team), 'blockKill', tLand, main.cp.p.id);

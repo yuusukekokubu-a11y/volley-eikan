@@ -202,6 +202,8 @@ export interface ActionInfo {
   serveType?: ServeType;
   /** 二段トス（セッター以外のトス） */
   secondary?: boolean;
+  /** アンダーハンドで上げたトス（リベロがフロントゾーンで上げる時） */
+  underhand?: boolean;
   /** 相手の返球を直接打った（ダイレクト） */
   direct?: boolean;
 }
