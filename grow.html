@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>育成（試作）</title>
+    <link rel="stylesheet" href="/src/view/grow.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="top">
+        <span id="date"></span>
+        <span id="money"></span>
+        <span class="label">方針</span><span id="policy"></span>
+        <button id="rest">休む</button>
+        <button id="newYear">最初から</button>
+      </div>
+      <div id="main">
+        <div id="left">
+          <div id="road"></div>
+          <div id="hand"></div>
+          <div id="log"></div>
+        </div>
+        <div id="right"><table id="squad"></table></div>
+      </div>
+      <div id="modal" class="hidden"><div id="modalBox"></div></div>
+      <div id="portrait">横向きにしてください</div>
+    </div>
+    <script type="module" src="/src/view/grow.ts"></script>
+  </body>
+</html>
