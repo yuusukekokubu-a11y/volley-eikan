@@ -54,6 +54,7 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     // 試作用：学年が上ほど試合に出てきた分だけ信頼度が高い
     trust: Math.round(Math.min(100, (grade - 1) * 35 + rng.range(0, 30))),
     injuryDays: 0,
+    energy: 100,
     exp: emptyExp(),
     aptExp: emptyAptExp(),
     traitProgress: {},

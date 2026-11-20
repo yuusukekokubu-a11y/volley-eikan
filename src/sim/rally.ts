@@ -522,17 +522,12 @@ class RallySim {
     const base = BLOCK_BASE_V[ts.tactics.block];
     let shift = 0;
     if (ts.tactics.block === 'dedicate') {
-      // 相手の前衛で一番攻撃力のある選手の側に寄る
+      // 相手のエースが前衛にいる時だけ、その側に寄る
       const opp = other(team);
       const ofs = this.frontSlots(opp);
-      let best: { c: CourtPlayer; r: number } | undefined;
-      for (const [c] of ofs) {
-        if (c.role === 'S' || c.role === 'L') continue;
-        const r = this.attackRating(c);
-        if (!best || r > best.r) best = { c, r };
-      }
-      if (best) {
-        const laneDef = -this.laneOf(best.c, ofs.get(best.c)!);
+      const ace = this.aceOf(opp);
+      if (ace && ofs.has(ace)) {
+        const laneDef = -this.laneOf(ace, ofs.get(ace)!);
         shift = Math.sign(laneDef) * BLOCK_BASE_V.dedicate.shift * Math.min(1.5, this.w.tactic);
       }
     }
@@ -541,7 +536,17 @@ class RallySim {
     for (const [c, s] of this.backSlots(team)) this.moveTo(c, dp[s], start(c));
   }
 
-  /** こちらの攻撃に向けて助走の位置へ */
+  /** そのチームのエース：コート上のアウトサイド・オポジットで一番攻撃力の高い選手（デディケートで寄る相手） */
+  private aceOf(team: TeamId): CourtPlayer | undefined {
+    let best: { c: CourtPlayer; r: number } | undefined;
+    for (const c of this.court[team]) {
+      if (c.role !== 'OH' && c.role !== 'OP') continue;
+      const r = this.attackRating(c);
+      if (!best || r > best.r) best = { c, r };
+    }
+    return best?.c;
+  }
+
   /**
    * こちらの攻撃に向けて助走の位置へ。start は選手ごとの動き出しの時刻
    * （ボールに触らない選手は、相手が打った時点で読む時間の後に、跳んでいた選手は着地して立て直したら動き出す）
@@ -1002,13 +1007,15 @@ class RallySim {
     // 配球の判断：テクニックが高いほど、相手ブロックが薄くなりそうな攻撃を選ぶ
     // アタッカーの助走の準備ができていない攻撃（戻りきれていない・間に合わない）ほど避ける
     const judge = this.skill(tosser, ['set', 'setChoice']) / 100;
+    // 空いている所を突く判断：普通のセッターはチームの方針どおりに上げ、うまいセッター（配球眼など）ほど対策の穴を突く
+    const exploit = SET.choiceK * clamp((this.skill(tosser, ['set', 'setChoice']) - SET.choicePivot) / SET.choiceSpan, 0, 1);
     const choice = this.rng.weighted(options.map(o => {
       const fl = TIMING.setFlight[o.type] + (useSetter ? 0 : TIMING.secondarySetExtra);
       const pl = this.approachPlan(o.c, o.type, o.lane, bu.t, bu.t + fl, o.c.p.id === bu.firstToucher ? bu.tPass + 0.1 : -Infinity);
       const unready = (1 - pl.q) + pl.late * 3;
       return {
         item: o,
-        w: o.w * Math.exp(SET.choiceK * judge * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter, bu.t)))
+        w: o.w * Math.exp(exploit * (BLOCK.maxBlockers - this.expectedBlockers(opp, o.lane, o.type, !useSetter, bu.t)))
           * Math.exp(-SET.readyK * judge * unready),
       };
     }));
@@ -1516,11 +1523,16 @@ class RallySim {
         return;
       }
       const sp = this.eff(c, 'speed');
-      const react = Math.max(0.05, readReaction(read) + (quick ? bsk.quickReact : bsk.sideReact));
+      // デディケート：相手のエースへのブロックは反応が早い
+      const dedicated = this.input.teams[def].tactics.block === 'dedicate' && this.aceOf(sb.team) === sb.attacker ? BLOCK_BASE_V.dedicate.aceReact : 0;
+      // バンチ：中央を見ているので、中央の攻撃への反応が早い
+      const bunched = quick && this.input.teams[def].tactics.block === 'bunch' ? BLOCK_BASE_V.bunch.quickReact : 0;
+      const react = Math.max(0.05, readReaction(read) + (quick ? bsk.quickReact : bsk.sideReact) + dedicated + bunched);
       // 読み→横移動→踏み切り（跳び上がるまでの時間）が、トスが上がってから打つまでに収まるか
       const tNeed = react + Math.abs(spot.v - p.v) / sideSpeed(sp) + TIMING.blockRise;
       const late = tNeed - tAvail;
-      if (late > BLOCK.lateLimit) return;
+      // 1人目は遅れても跳ぶ（lateLimit まで）。2人目・3人目は、間に合わないなら跳ばずに守備に残る
+      if (late > (res.length === 0 ? BLOCK.lateLimit : BLOCK.commitLate)) return;
       const timing = late <= 0 ? 1 : 1 - (late / BLOCK.lateLimit) * BLOCK.latePenalty;
       this.moveTo(c, spot, sb.tSet + react, {
         arriveBy: sb.tSet + Math.max(tNeed - TIMING.blockRise, 0.15), asap: true, dur: Math.abs(spot.v - p.v) / sideSpeed(sp),
@@ -1547,7 +1559,7 @@ class RallySim {
       if (!c.front || c.role === 'L') continue;
       const p = this.posAt(c, tSet);
       const tNeed = readReaction(this.blockSkill(c, ['blockRead'])) + Math.abs(laneDef - p.v) / sideSpeed(this.eff(c, 'speed')) + TIMING.blockRise;
-      if (tNeed - tAvail <= BLOCK.lateLimit * 0.5) n++;
+      if (tNeed - tAvail <= (n === 0 ? BLOCK.lateLimit * 0.5 : BLOCK.commitLate)) n++;
     }
     return Math.min(n, BLOCK.maxBlockers);
   }

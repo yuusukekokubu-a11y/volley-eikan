@@ -76,6 +76,11 @@ export interface Player extends Abilities {
   trust: number;
   /** 怪我の残り日数（0なら怪我なし） */
   injuryDays: number;
+  /**
+   * 育成用の体力（0〜100）。練習で減り、減っていると怪我をしやすく、緑パネルや休みで回復する。
+   * 試合中の疲れ（試合の側で持つ、見せない値）とは別のもの
+   */
+  energy: number;
   /** 能力ごとの経験の端数（1たまると能力が1上がる） */
   exp: Record<TrainKey, number>;
   /** 位置ごとの適性の経験（たまると適性が1段階上がる） */

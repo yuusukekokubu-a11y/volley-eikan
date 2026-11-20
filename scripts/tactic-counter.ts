@@ -84,6 +84,18 @@ for (const own of OWN) {
     console.log(`${own.name}（合う＝${own.fit}）× ${opp.name}${mark}：${pct(sp)}／バンチ ${d(bu - sp)}／デディケート ${d(de - sp)}`);
   }
 }
+console.log('\n[セッターの上手さ] 相手のセッターが普通／うまい時の、対策の効き（スプレッドとの差）');
+const setTech = (v: number): Mod => players(p => ({ ...p, technique: v }), ['S']);
+const goodSetter: Mod = both(setTech(80), give(['setEye'], ['S']));
+for (const opp of OPP.filter(o => o.counter.block)) {
+  for (const [label, sm] of [['普通のセッター（テクニック50）', setTech(50)], ['うまいセッター（テクニック80・配球眼）', goodSetter]] as [string, Mod][]) {
+    const m = both(opp.mod, sm);
+    const sp = avg(off => rate(OWN[0].mod, m, 'spread', 'back', off));
+    const c = avg(off => rate(OWN[0].mod, m, opp.counter.block!, 'back', off));
+    console.log(`${opp.name}・${label}：スプレッド ${pct(sp)}／対策（${opp.counter.block === 'bunch' ? 'バンチ' : 'デディケート'}）${d(c - sp)}`);
+  }
+}
+
 console.log('\n[レシーブ] 相手の偏り：後ろ寄り／前寄り（後ろ寄りとの差）');
 for (const opp of OPP) {
   const back = avg(off => rate(OWN[0].mod, opp.mod, 'spread', 'back', off));

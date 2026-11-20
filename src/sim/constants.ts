@@ -60,9 +60,11 @@ export const LANE_V = {
 export const HIT_U = 0.6;
 
 export const BLOCK_BASE_V = {
-  bunch: { left: 1.0, mid: 0, right: -1.0 },
+  /** バンチ：中央に寄り、中央の攻撃（速攻・時間差・ブロード）への反応が quickReact 秒早い */
+  bunch: { left: 1.1, mid: 0, right: -1.1, quickReact: -0.1 },
   spread: { left: 3.0, mid: 0, right: -3.0 },
-  dedicate: { left: 2.2, mid: 0, right: -2.2, shift: 1.2 },
+  /** デディケート：相手のエースが前衛にいる時だけ、その側へ shift 寄る。エースへのブロックの反応が aceReact 秒早い */
+  dedicate: { left: 2.2, mid: 0, right: -2.2, shift: 0.6, aceReact: -0.07 },
 };
 
 export const DEFENSE_POS = {
@@ -212,7 +214,13 @@ export const SET = {
     quick: { quick: 0.42, timeDiff: 0.25, fast: 0.2, high: 0.13, back: 0.08, broad: 0.2 },
   } as Record<AttackTactic, Record<SetType, number>>,
   /** 配球の判断：ブロックが薄そうな攻撃ほど選びやすくなる強さ（テクニック100で最大） */
-  choiceK: 0.9,
+  choiceK: 1.2,
+  /**
+   * 空いている所を突く判断の強さは、セッターの判断（テクニック、場面 setChoice。配球眼で上がる）で決まる。
+   * 判断が choicePivot 以下なら、チームの方針どおりに上げる（突かない）。choicePivot＋choiceSpan で最大
+   */
+  choicePivot: 50,
+  choiceSpan: 40,
   /** 配球の判断：アタッカーの助走の準備ができていない攻撃ほど避ける強さ（テクニック100で最大） */
   readyK: 1.5,
   /** サイドへのトスがエースに行く確率 */
@@ -269,9 +277,11 @@ export const ATTACK = {
 export const BLOCK = {
   /** ブロックの上から打ち抜いたとみなす差（cm） */
   overMarginCm: 30,
-  /** 間に合わなさ（秒）がこれ以上なら跳べない */
-  lateLimit: 0.3,
+  /** 間に合わなさ（秒）がこれ以上なら跳べない。1人目（打つ所に一番近い選手）はここまでなら遅れても跳ぶ */
+  lateLimit: 0.55,
   latePenalty: 0.8,
+  /** 2人目・3人目は、遅れがこれ以下の時だけ跳ぶ（間に合わないなら跳ばずに守備に残る） */
+  commitLate: 0.15,
   readExtra: 0.1,
   spotSpacing: 0.7,
   maxBlockers: 3,
@@ -292,7 +302,8 @@ export const BLOCK = {
   killBase: 0.1,
   /** シャットの勝負で、打ち手のテクニック（ずらして当てる上手さ）が攻撃力に足される量 */
   killTech: 0.45,
-  power: { base: 30, block: 0.5, height: 0.4, extra: 5 },
+  /** 止める力。間に合った2枚目・3枚目は extra ずつ足す（壁としてはっきり効く） */
+  power: { base: 30, block: 0.5, height: 0.4, extra: 10 },
   /** ブロックアウトの確率（打ち手テクニック50の時） */
   blockOutBase: 0.12,
   /** ワンタッチの後、攻撃側に戻る割合（それ以外は守備側コートへ） */
@@ -356,7 +367,7 @@ export const DIRECT = {
 export const TACTIC_FIT = {
   /** レシーブ前寄りでフェイント、後ろ寄りで強打を拾う時の技量補正 */
   receiveMatch: 10,
-  receiveMismatch: -4,
+  receiveMismatch: -10,
 };
 
 // ---------------- 負荷（疲れの元） ----------------
