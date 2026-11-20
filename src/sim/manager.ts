@@ -36,7 +36,7 @@ const every = (delta: StageDelta, scene: Scene = 'all'): StatEffect[] => ALL.map
 
 export const MANAGER_SKILLS: Record<string, ManagerSkill> = {
   /** 監督特能を持っていない時の基本効果（仕様：自チーム全体を少しだけアップ） */
-  basic: { id: 'basic', name: '基本効果', kind: 'timeout', desc: '自チーム全体を少しだけ上げる', own: every(3) },
+  basic: { id: 'basic', name: '基本効果', kind: 'timeout', desc: '自チーム全体をわずかに上げる', own: every(1) },
   // ---- タイムアウト系 ----
   geki: { id: 'geki', name: '檄', kind: 'timeout', desc: '自チーム全体を上げる', own: every(5) },
   tatenaoshi: {
