@@ -652,3 +652,15 @@ export const COACH = {
   /** ピンチサーバー：サーブの強さの目安がこれだけ上の控えがいれば、終盤にサーブの間だけ入れる */
   pinchMargin: 8,
 };
+
+/**
+ * ディグの乱れ（相手の攻撃を拾ったボール）。上がったボールの位置のずれに足す（m）。
+ * 足す量＝ maxExtra ×（floor ＋（1−floor）× 乱れ）× ばらつき。乱れ＝（打球の強さ − 技量 × skillRatio）/ scale（0〜1）。
+ * 技量はレシーブと同じ（テクニック中心）。強打は大きく、ワンタッチは中くらい、フェイントは少し乱れる
+ */
+export const DIG = {
+  maxExtra: { spike: 3.2, oneTouch: 1.8, blockBack: 1.2, tip: 0.8 },
+  floor: 0.45,
+  skillRatio: 0.6,
+  scale: 30,
+};

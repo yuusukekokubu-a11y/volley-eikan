@@ -12,7 +12,7 @@ import {
 } from './ability';
 import {
   APPROACH, ATTACK, BLOCK, BLOCK_BASE_V, BODY, COURT, COVER, DEFENSE_POS, DIRECT, RECORD, GENDER_WEIGHTS, HIT_U, LANE_V, LOAD,
-  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD, DEFENSE_RETURN, LIBERO,
+  MAX_CONTACTS, PASS, RECEIVE_FORMATION, SERVE, SERVE_RUN, SET, SET_TARGET, SERVE_CHOICE, STYLE, TACTIC_FIT, TIMING, TRAIT_EXTRA, BACK_ATTACK, DUMP, REBOUND, BROAD, DEFENSE_RETURN, LIBERO, DIG,
 } from './constants';
 import { Rng } from './rng';
 import { canDo, hasTrait, styleOf, traitDelta, traitExtra, type Scene } from './traits';
@@ -875,7 +875,14 @@ class RallySim {
       return this.point(opp, reason, inc.tArrive + 0.7, key);
     }
 
-    const offset = PASS.maxOffset * Math.pow(1 - p, PASS.offsetPow) * this.rng.range(0.6, 1.25);
+    let offset = PASS.maxOffset * Math.pow(1 - p, PASS.offsetPow) * this.rng.range(0.6, 1.25);
+    // ディグの乱れ：相手の攻撃を拾ったボールは、打球の強さがディグする選手の技量（テクニック）を上回るほど大きく乱れる。
+    // 強打は大きく、ワンタッチは中くらい、フェイントは少し。サーブレシーブとチャンスボールには足さない
+    const digMax = DIG.maxExtra[inc.kind as keyof typeof DIG.maxExtra];
+    if (digMax) {
+      const disorder = clamp((inc.pressure - sk * DIG.skillRatio) / DIG.scale, 0, 1);
+      offset += digMax * (DIG.floor + (1 - DIG.floor) * disorder) * this.rng.range(0.5, 1.3);
+    }
     const spin = clamp((inc.pressure / 100) * (1 - p) * PASS.spinScale + this.rng.range(0, 0.08), 0, 1);
     this.act(c, inc.tArrive, isServe ? 'receive' : 'dig', inc.land, z, { offset: round(offset), spin: round(spin) });
 
