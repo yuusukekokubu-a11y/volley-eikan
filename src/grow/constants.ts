@@ -46,16 +46,48 @@ export const YELLOW_BONUS = 1.5;
  * stop：大会は試合をするので必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる。
  * 大会の日程は第3段階の「大会」で決め直す
  */
-export const FIXED_EVENTS: { id: string; name: string; month: number; day: number; stop: boolean }[] = [
+export interface FixedEvent {
+  id: string;
+  name: string;
+  month: number;
+  day: number;
+  stop: boolean;
+  /** 同じ種類の行事が何回かある時の種類（練習試合）。イベントのきっかけはこの種類で見る */
+  kind?: string;
+}
+
+export const FIXED_EVENTS: FixedEvent[] = [
   { id: 'entrance', name: '入学式', month: 4, day: 7, stop: false },
   { id: 'physical', name: '身体測定', month: 4, day: 15, stop: false },
   { id: 'interhighPrelim', name: 'インターハイ予選', month: 6, day: 1, stop: true },
   { id: 'interhigh', name: 'インターハイ本戦', month: 7, day: 28, stop: true },
-  { id: 'camp', name: '合宿', month: 8, day: 10, stop: false },
+  { id: 'campSummer', name: '夏合宿', month: 8, day: 1, stop: false },
   { id: 'harukouPrelim', name: '春高予選', month: 11, day: 1, stop: true },
+  { id: 'campWinter', name: '冬合宿', month: 12, day: 26, stop: false },
   { id: 'harukou', name: '春高本戦', month: 1, day: 5, stop: true },
+  { id: 'retire', name: '3年生の引退', month: 1, day: 15, stop: false },
   { id: 'graduation', name: '卒業式', month: 3, day: 1, stop: false },
+  // 練習試合：マネージャーが組む（決まった時期に起きる）。試合をするので止まる。日付は仮
+  ...([[5, 5], [6, 20], [8, 20], [9, 20], [10, 12], [12, 10], [2, 11], [3, 20]] as const).map(([month, day]) =>
+    ({ id: `practiceMatch-${month}-${day}`, name: '練習試合', month, day, stop: true, kind: 'practiceMatch' })),
 ];
+
+/**
+ * 合宿：夏と冬の年2回。1ヶ月前の月初め（練習指示を変える日）に、開催するかを選ぶ。
+ * 合宿の間は、練習の経験が expMul 倍、体力の減りが energyMul 倍。
+ * 終わった時、合宿で練習した能力に応じて特能が取れる（1人ごとに、合宿で練習した日数 × traitPerDay の確率で1つ）
+ */
+export const CAMP = {
+  summer: { name: '夏合宿', offer: { month: 7, day: 1 }, start: { month: 8, day: 1 }, days: 7 },
+  winter: { name: '冬合宿', offer: { month: 12, day: 1 }, start: { month: 12, day: 26 }, days: 5 },
+  expMul: 2,
+  energyMul: 2,
+  traitPerDay: 0.03,
+};
+
+/** 練習指示：変えられるのは毎月1日（通り過ぎても止まる）と、練習指示カードを使った時。カードが手札に来る確率（1枚引くごと） */
+export const INSTRUCTION_CARD_CHANCE = 0.03;
+
 
 /**
  * 練習の経験（1日あたり）。経験は能力ごとの端数にたまり、1たまると能力が1上がる。

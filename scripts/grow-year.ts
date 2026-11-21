@@ -40,6 +40,7 @@ function run(focus: boolean, buy: boolean): Result {
       const res = avg < 45 ? (r.rests++, s.rest()) : s.useCard(0);
       if (res.needBranch) s.chooseBranch(0);
       while (s.pending) s.choose(0);
+      if (s.campOffer) s.decideCamp(true);
       for (const p of sq.players) r.cond[p.condition + 2]++;
     }
     for (const p of sq.players) {

@@ -86,6 +86,8 @@ export interface Player extends Abilities {
   /** 特能のきっかけの進み具合（特能 ID ごと） */
   traitProgress: Record<string, number>;
   stats: CareerStats;
+  /** 引退した（3年生は春高の後に引退し、卒業までは試合にも練習にも出ない） */
+  retired: boolean;
   /** 卒業後の進路（決まるまでは null） */
   career: string | null;
   /** 練習指示：伸ばす能力（おまかせ＝カードどおり）と、練習するポジション */

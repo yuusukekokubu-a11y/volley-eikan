@@ -24,6 +24,7 @@ function playYear(c: Career) {
     const r = s.useCard(0);
     if (r.needBranch) s.chooseBranch(0);
     while (s.pending) s.choose(0);
+    if (s.campOffer) s.decideCamp(true);
   }
 }
 
@@ -119,5 +120,90 @@ describe('体育館レベルの上限', () => {
   it('機材を全部そろえるとレベル19が上限', () => {
     expect(gymLevel(EQUIPMENT.map(e => e.id))).toBe(GYM.maxLevel);
     expect(gymMul(GYM.maxLevel)).toBeCloseTo(1 + 18 * GYM.perLevelGain);
+  });
+});
+
+/** 条件を満たすまで進める（合宿は answer で返事をする） */
+function until(c: Career, done: () => boolean, answer = true) {
+  const s = c.season;
+  let guard = 0;
+  while (!done() && !s.over && guard++ < 1000) {
+    const r = s.useCard(0);
+    if (r.needBranch) s.chooseBranch(0);
+    while (s.pending) s.choose(0);
+    if (s.campOffer) s.decideCamp(answer);
+  }
+}
+
+describe('練習指示・引退・合宿・練習試合', () => {
+  it('練習指示を変えられるのは月初め（通り過ぎても止まる）と練習指示カードの後だけ', () => {
+    const c = new Career({ seed: 4, squad: startSquad(4), events: [] });
+    const s = c.season;
+    const p = c.squad.players[0];
+    s.setPractice(p.id, { focus: 'power' }); // 4月1日は開いている
+    expect(p.practice.focus).toBe('power');
+    let closed = false;
+    for (let i = 0; i < 40 && !closed; i++) {
+      const before = s.date.month;
+      const r = s.useCard(0);
+      if (r.needBranch) s.chooseBranch(0);
+      while (s.pending) s.choose(0);
+      if (s.campOffer) s.decideCamp(false);
+      if (!s.practiceOpen) { closed = true; expect(() => s.setPractice(p.id, { focus: 'jump' })).toThrow(); }
+      // 月が変わったら、必ず1日で止まっている
+      if (s.date.month !== before && !r.needBranch) expect(s.date.day).toBe(1);
+    }
+    expect(closed).toBe(true);
+    until(c, () => s.date.month === 5);
+    expect(s.date.day).toBe(1);
+    expect(s.practiceOpen).toBe(true);
+    s.setPractice(p.id, { focus: 'jump', position: 'OP' });
+    expect(p.practice).toEqual({ focus: 'jump', position: 'OP' });
+    // 練習指示カード：使うと進まずに開く
+    s.useCard(0);
+    s.hand[0] = { days: 0, practiceId: '', instruction: true };
+    const day = s.day;
+    const r = s.useCard(0);
+    expect(r.practiceOpen).toBe(true);
+    expect(s.day).toBe(day);
+    s.setPractice(p.id, { focus: 'auto' });
+  });
+
+  it('3年生は1月の引退の後、練習にも出ず、3月に卒業する', () => {
+    const c = new Career({ seed: 6, squad: startSquad(6), events: [] });
+    const s = c.season;
+    until(c, () => s.date.month === 2);
+    const third = c.squad.players.filter(p => gradeOf(p, 1) === 3);
+    expect(third.length).toBeGreaterThan(0);
+    expect(third.every(p => p.retired)).toBe(true);
+    expect(c.squad.players.filter(p => gradeOf(p, 1) < 3).every(p => !p.retired)).toBe(true);
+    const power = third.map(p => p.power + p.exp.power);
+    const energy = third.map(p => p.energy);
+    until(c, () => s.date.month === 3 && s.date.day > 1);
+    expect(third.map(p => p.energy)).toEqual(energy);
+    expect(c.squad.players.some(p => p.retired)).toBe(false);
+    expect(power.length).toBe(third.length);
+    expect(() => s.setPractice(third[0].id, { focus: 'power' })).toThrow();
+  });
+
+  it('合宿：1ヶ月前の月初めに開催するかを選ぶ。開催すると体力が多く減り、経験が多く入る', () => {
+    const run = (hold: boolean) => {
+      const c = new Career({ seed: 8, squad: startSquad(8), events: [] });
+      const s = c.season;
+      until(c, () => s.campOffer !== null || s.date.month === 7, hold);
+      expect(s.date).toEqual({ month: 7, day: 1 });
+      until(c, () => s.date.month === 8 && s.date.day > 8, hold);
+      expect(s.camps.summer).toBe(hold);
+      return c.squad.players.reduce((a, p) => a + p.jump + p.power + p.speed + p.technique + p.block + p.stamina, 0);
+    };
+    expect(run(true)).toBeGreaterThan(run(false));
+  });
+
+  it('練習試合の日は止まる', () => {
+    const c = new Career({ seed: 9, squad: startSquad(9), events: [] });
+    const s = c.season;
+    until(c, () => s.date.month === 5 && s.date.day >= 5);
+    expect(s.date).toEqual({ month: 5, day: 5 });
+    expect(s.panelAt(s.day).fixedId).toBe('practiceMatch-5-5');
   });
 });

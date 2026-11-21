@@ -61,7 +61,7 @@ describe('双六の進行', () => {
   it('手札は5枚、進む日数は1〜5。使うと書いてある日数だけ進み、1枚引く', () => {
     const s = new Season({ seed: 1, squad: squad(), events: [] });
     expect(s.hand).toHaveLength(HAND.size);
-    for (const c of s.hand) expect(c.days).toBeGreaterThanOrEqual(1);
+    for (const c of s.hand.filter(c => !c.instruction)) expect(c.days).toBeGreaterThanOrEqual(1);
     for (const c of s.hand) expect(c.days).toBeLessThanOrEqual(5);
     let guard = 0;
     while (guard++ < 30) {
@@ -70,8 +70,9 @@ describe('双六の進行', () => {
       const r = s.useCard(0);
       if (r.needBranch) { s.chooseBranch(0); continue; }
       expect(s.hand).toHaveLength(HAND.size);
-      // 大会で止まった時だけ、書いてある日数より短い
-      if (s.day - before !== days) expect(s.panelAt(s.day).kind).toBe('fixed');
+      // 大会・練習試合・月初めで止まった時だけ、書いてある日数より短い
+      if (s.day - before !== days) expect(s.panelAt(s.day).kind === 'fixed' || s.date.day === 1 || days === 0).toBe(true);
+      if (s.campOffer) s.decideCamp(false);
       while (s.pending) s.choose(0);
     }
   });

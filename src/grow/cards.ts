@@ -4,7 +4,7 @@
 
 import type { Rng } from '../sim/rng';
 import type { TrainKey } from '../sim/types';
-import { HAND } from './constants';
+import { HAND, INSTRUCTION_CARD_CHANCE } from './constants';
 
 /** 機材：なし・下位・上位 */
 export type Equipment = 'none' | 'basic' | 'advanced';
@@ -55,6 +55,8 @@ export const CARD_WEIGHTS = { base: 1, policyMul: 2.5, general: 1.5, efficient: 
 export interface Card {
   days: number;
   practiceId: string;
+  /** 練習指示カード：使うと練習指示を変えられる（進まない、練習もしない） */
+  instruction?: boolean;
 }
 
 /**
@@ -78,6 +80,7 @@ export function efficientReady(id: string, policy: TeamPolicy, owned: string[]):
  * 高効率カードは条件（方針＋機材）を満たせば出る
  */
 export function drawCard(rng: Rng, policy: TeamPolicy, owned: string[] = []): Card {
+  if (rng.chance(INSTRUCTION_CARD_CHANCE)) return { days: 0, practiceId: '', instruction: true };
   const fav = new Set(POLICY[policy].abilities);
   const pool = PRACTICES.filter(p => p.kind === 'efficient' ? efficientReady(p.id, policy, owned) : p.equipment === 'none' || owned.includes(p.id));
   const practice = rng.weighted(pool.map(p => ({

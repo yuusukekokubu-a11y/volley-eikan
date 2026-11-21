@@ -1,7 +1,7 @@
 // 育成（双六）の仮の画面。見た目は第4段階で作り込む。
 // 手札から進行カードを選んで進む。止まったマスのパネル・イベントの結果と、選手の体力・調子を見せる。
 
-import { FIXED_EVENTS, MONEY } from '../grow/constants';
+import { CAMP, FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
 import { abilityRank } from './common';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
@@ -50,7 +50,7 @@ function dayCol(d: BoardDay, here: boolean): string {
 
 function render() {
   const { month, day } = season.date;
-  $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました。「次の年へ」で新しい年度に進みます）' : ''}`;
+  $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました。「次の年へ」で新しい年度に進みます）' : season.practiceOpen ? '（練習指示を変えられます）' : ''}`;
   $('money').textContent = `お金 ${season.money.toLocaleString()}円`;
   $('gym').textContent = `体育館レベル ${season.gym}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
@@ -61,12 +61,13 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over;
+  const busy = !!season.pending || season.over || !!season.campOffer;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
     const pr = PRACTICE[c.practiceId];
     const b = document.createElement('button');
-    b.innerHTML = `<b>${c.days}</b><small>${pr.name}</small><small>${pr.abilities.map(a => ABILITY_NAME[a]).join('・')}</small>`;
+    b.innerHTML = c.instruction ? `<b>指示</b><small>練習指示カード</small><small>進まずに練習指示を変える</small>`
+      : `<b>${c.days}</b><small>${pr.name}</small><small>${pr.abilities.map(a => ABILITY_NAME[a]).join('・')}</small>`;
     b.disabled = busy;
     b.onclick = () => after(season.useCard(i));
     $('hand').appendChild(b);
@@ -82,7 +83,7 @@ function render() {
     const isNew = season.newcomers.includes(p) ? '（新）' : '';
     return `<tr><td>${p.number}</td><td>${p.name}${isNew}</td><td>${p.height}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
       <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}</td><td>${COND[p.condition + 2]}</td>
-      <td><button class="small" data-pr="${p.id}">${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button></td></tr>`;
+      <td>${p.retired ? '引退' : `<button class="small" data-pr="${p.id}" ${season.practiceOpen ? '' : 'disabled'}>${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button>`}</td></tr>`;
   }).join('');
   $('squad').innerHTML = `<tr><th>番</th><th>名前</th><th>身長</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;
   for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pr]'))) {
@@ -96,6 +97,7 @@ function after(r: StepResult) {
   const where = r.panel ? `（${PANEL_NAME[r.panel.kind]}）` : '';
   log.push(`${month}/${day}${where} ${r.notes.join('・')}`);
   if (r.needBranch) openBranch();
+  else if (season.campOffer) openCamp();
   else if (season.pending) openEvent();
   render();
 }
@@ -110,6 +112,25 @@ function openBranch() {
   $('modal').classList.remove('hidden');
   ($('lane0') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); after(season.chooseBranch(0)); };
   ($('lane1') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); after(season.chooseBranch(1)); };
+}
+
+/** 合宿：開催するかを選ぶ（1ヶ月前の月初め） */
+function openCamp() {
+  const k = season.campOffer!;
+  const c = CAMP[k];
+  $('modalBox').innerHTML = `<div class="text">${c.name}（${c.start.month}/${c.start.day}から${c.days}日間）を開催しますか。<br>
+    合宿の間は体力が多く減りますが、経験が多く入り、練習した能力に応じて特能が取れることがあります。</div>
+    <div class="choices"><button id="campYes">開催する</button><button id="campNo">開催しない</button></div>`;
+  $('modal').classList.remove('hidden');
+  const done = (hold: boolean) => {
+    season.decideCamp(hold);
+    log.push(`${c.name}を${hold ? '開催する' : '開催しない'}`);
+    $('modal').classList.add('hidden');
+    if (season.pending) openEvent();
+    render();
+  };
+  ($('campYes') as HTMLButtonElement).onclick = () => done(true);
+  ($('campNo') as HTMLButtonElement).onclick = () => done(false);
 }
 
 /** イベント：文章と選択肢 */
@@ -142,10 +163,10 @@ function openPractice(id: string) {
       <div class="choices">${(Object.keys(ROLE_NAME) as Role[]).map(r => `<button class="${p.practice.position === r ? 'on' : 'off'}" data-r="${r}">${ROLE_NAME[r]}</button>`).join('')}</div>
       <div class="choices"><button id="close">閉じる</button></div>`;
     for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-f]'))) {
-      b.onclick = () => { p.practice.focus = b.getAttribute('data-f') as TrainKey | 'auto'; draw(); };
+      b.onclick = () => { season.setPractice(p.id, { focus: b.getAttribute('data-f') as TrainKey | 'auto' }); draw(); };
     }
     for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-r]'))) {
-      b.onclick = () => { p.practice.position = b.getAttribute('data-r') as Role; draw(); };
+      b.onclick = () => { season.setPractice(p.id, { position: b.getAttribute('data-r') as Role }); draw(); };
     }
     ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
   };

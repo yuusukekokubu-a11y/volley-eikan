@@ -58,6 +58,7 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     aptExp: emptyAptExp(),
     traitProgress: {},
     stats: emptyStats(),
+    retired: false,
     career: null,
     practice: { focus: 'auto', position: role },
     personality: null,
