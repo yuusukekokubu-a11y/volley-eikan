@@ -1,3 +1,4 @@
+import { finishStep } from '../src/grow/season';
 // 育成の確認用：何年分かを自動で回して、卒業時の能力の分布と体育館レベルの推移を見る。
 // 最初の部員：2・3年生を新入生の仕組みで作る（能力は入学時のまま）。
 // 進め方：体力の平均が45を切ったら休む。それ以外は手札の1枚目。分かれ道は上の道。
@@ -50,8 +51,7 @@ function run(focus: boolean, buy: boolean) {
         // 練習指示は、変えられる日（月初め）に変える
         if (s.practiceOpen) for (const p of s.squad.players) if (focus && !p.retired && p.practice.focus === 'auto') s.setPractice(p.id, { focus: FOCUS[p.practice.position] });
         const avg = s.squad.players.reduce((a, p) => a + p.energy, 0) / Math.max(1, s.squad.players.length);
-        let r = avg < 45 ? s.rest() : s.useCard(s.firstUsable());
-        while (r.needBranch) r = s.chooseBranch(0);
+        finishStep(s, avg < 45 ? s.rest() : s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
         if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);

@@ -1,3 +1,4 @@
+import { finishStep } from '../src/grow/season';
 import { describe, expect, it } from 'vitest';
 import { Career } from '../src/grow/career';
 import { CAMP, GYM, MONEY, PRACTICE_MATCH, ROSTER, SATURDAY } from '../src/grow/constants';
@@ -22,8 +23,7 @@ function playYear(c: Career) {
   const s = c.season;
   let guard = 0;
   while (!s.over && guard++ < 1000) {
-    const r = s.useCard(s.firstUsable());
-    if (r.needBranch) s.chooseBranch(0);
+    finishStep(s, s.useCard(s.firstUsable()));
     while (s.pending) s.choose(0);
     if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
@@ -130,8 +130,7 @@ function until(c: Career, done: () => boolean) {
   const s = c.season;
   let guard = 0;
   while (!done() && !s.over && guard++ < 1000) {
-    const r = s.useCard(s.firstUsable());
-    if (r.needBranch) s.chooseBranch(0);
+    finishStep(s, s.useCard(s.firstUsable()));
     while (s.pending) s.choose(0);
     if (s.matchChoices) s.chooseMatch(0);
     if (s.matchInvite) s.answerInvite(true);
@@ -139,30 +138,36 @@ function until(c: Career, done: () => boolean) {
 }
 
 describe('練習指示・引退・合宿・練習試合', () => {
-  it('練習指示を変えられるのは月初め（通り過ぎても止まる）と練習指示カードの後だけ', () => {
+  it('練習指示を変えられるのは月初め（通り過ぎる時は一時停止して、残りの日数を続けて進む）と練習指示カードの後だけ', () => {
     const c = new Career({ seed: 4, squad: startSquad(4), events: [] });
     const s = c.season;
     const p = c.squad.players[0];
     s.setPractice(p.id, { focus: 'power' }); // 4月1日は開いている
     expect(p.practice.focus).toBe('power');
     let closed = false;
-    for (let i = 0; i < 40 && !closed; i++) {
-      const before = s.date.month;
-      const r = s.useCard(s.firstUsable());
-      if (r.needBranch) s.chooseBranch(0);
+    let paused = false;
+    for (let i = 0; i < 80 && !(closed && paused); i++) {
+      const i0 = s.firstUsable();
+      const days = s.hand[i0].days;
+      const before = s.day;
+      let r = s.useCard(i0);
+      while (r.needBranch) r = s.chooseBranch(0);
+      if (r.paused) {
+        // 月初めで一時停止：練習指示を変えられ、続きを進むと残りの日数を進む
+        paused = true;
+        expect(s.date.day).toBe(1);
+        expect(() => s.useCard(s.firstUsable())).toThrow();
+        s.setPractice(p.id, { focus: 'jump' });
+        const r2 = finishStep(s, s.resume());
+        if (!r2.match && s.panelAt(s.day).kind !== 'fixed' && !r2.practiceOpen) expect(s.day - before).toBe(days);
+      }
       while (s.pending) s.choose(0);
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(true);
       if (!s.practiceOpen) { closed = true; expect(() => s.setPractice(p.id, { focus: 'jump' })).toThrow(); }
-      // 月が変わったら、必ず1日で止まっている
-      if (s.date.month !== before && !r.needBranch) expect(s.date.day).toBe(1);
     }
     expect(closed).toBe(true);
-    until(c, () => s.date.month === 5);
-    expect(s.date.day).toBe(1);
-    expect(s.practiceOpen).toBe(true);
-    s.setPractice(p.id, { focus: 'jump', position: 'OP' });
-    expect(p.practice).toEqual({ focus: 'jump', position: 'OP' });
+    expect(paused).toBe(true);
     // 練習指示カード：使うと進まずに開く
     s.useCard(s.firstUsable());
     s.hand[0] = { days: 0, practiceId: '', special: 'instruction' };
@@ -215,10 +220,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
   it('練習試合：申し込みカードで3校から選ぶと次の土曜日に止まる。大会の20日前からは使えない', () => {
     const c = new Career({ seed: 9, squad: startSquad(9), events: [] });
     const s = c.season;
-    // 1年目の6月はマネージャーが組んでいる
-    expect(s.scheduledMatch?.via).toBe('manager');
-    expect(s.weekday(s.scheduledMatch!.day)).toBe(SATURDAY);
-    s.scheduledMatch = null;
+    expect(s.scheduledMatch).toBeNull();
     s.hand[0] = { days: 0, practiceId: '', special: 'matchOffer' };
     const r = s.useCard(0);
     expect(r.matchChoices).toHaveLength(PRACTICE_MATCH.candidates);
@@ -231,8 +233,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
     expect(s.canUse({ days: 0, practiceId: '', special: 'matchOffer' })).toBe(false);
     let stopped: unknown = null;
     for (let i = 0; i < 20 && !stopped; i++) {
-      const res = s.useCard(s.firstUsable());
-      if (res.needBranch) s.chooseBranch(0);
+      const res = finishStep(s, s.useCard(s.firstUsable()));
       while (s.pending) s.choose(0);
       if (res.match) stopped = res.match;
     }
@@ -252,8 +253,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
       const s = c.season;
       s.scheduledMatch = null;
       for (let i = 0; i < 300 && !s.over && seen < 2; i++) {
-        let r = s.useCard(s.firstUsable());
-        while (r.needBranch) r = s.chooseBranch(0);
+        const r = finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
         if (s.matchChoices) s.chooseMatch(0);
         if (r.matchInvite) {
@@ -269,5 +269,43 @@ describe('練習指示・引退・合宿・練習試合', () => {
       }
     }
     expect(seen).toBe(2);
+  });
+
+  it('1年目の6月に、マネージャーが練習試合を組んで知らせる（2年目からはない）', () => {
+    const c = new Career({ seed: 3, squad: startSquad(3), events: [] });
+    const s = c.season;
+    const said: string[] = [];
+    let guard = 0;
+    while (!(s.date.month === 6 && s.date.day > 1) && guard++ < 200) {
+      const r = finishStep(s, s.useCard(s.firstUsable()));
+      for (const m of r.messages ?? []) said.push(m.text);
+      while (s.pending) s.choose(0);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(false);
+    }
+    expect(s.scheduledMatch?.via).toBe('manager');
+    expect(s.weekday(s.scheduledMatch!.day)).toBe(SATURDAY);
+    expect(said.some(t => t.startsWith('監督、') && t.includes('との練習試合を組んでおきました'))).toBe(true);
+    until(c, () => s.over);
+    c.nextYear();
+    until(c, () => c.season.date.month === 7);
+    expect(c.season.flags.managerMatchDone).toBe(true);
+  });
+
+  it('合宿の始まり・特能・終わりの文章が出る', () => {
+    const c = new Career({ seed: 2, squad: startSquad(2), events: [] });
+    const s = c.season;
+    const said: string[] = [];
+    let guard = 0;
+    while (s.date.month !== 8 && guard++ < 300) {
+      const r = finishStep(s, s.useCard(s.firstUsable()));
+      for (const m of r.messages ?? []) said.push(m.text);
+      while (s.pending) s.choose(0);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(false);
+    }
+    expect(said).toContain('今日から夏合宿です！5日間、みっちり練習しましょう！');
+    expect(said).toContain('合宿おつかれさまでした！みんな、ひと回りたくましくなりましたね');
+    expect(said.some(t => /^.+が合宿で『.+』を身につけた！$/.test(t))).toBe(true);
   });
 });

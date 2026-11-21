@@ -12,6 +12,7 @@ import { campOf, dateOf, indexOf, makeBoard, weekdayOf, type BoardDay, type Pane
 import { drawCard, PRACTICE, type Card, type PracticeDef, type TeamPolicy } from './cards';
 import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, YELLOW_BONUS } from './constants';
 import { SURNAMES } from './names';
+import { fill, TEXTS, type Message } from './texts';
 import { applyPractice, dailyCondition, EQUIPMENT, gymLevel } from './practice';
 import { bestRole, enroll, graduate, measure, type Graduate } from './roster';
 import { EVENTS, pickEvent, resolveEvent, type EventDef, type EventWorld, type PendingEvent } from './events';
@@ -48,6 +49,8 @@ export interface StepResult {
   event?: PendingEvent;
   /** 練習指示を変えられる（月初め・練習指示カード） */
   practiceOpen?: boolean;
+  /** 月初めを通り過ぎる途中で一時停止した（練習指示を変えてから resume で残りの日数を進む） */
+  paused?: boolean;
   /** 練習試合申し込みカードを使った：3校から相手を選ぶ（chooseMatch で続ける） */
   matchChoices?: MatchOpponent[];
   /** 白パネルで他校から練習試合の申し込みが来た（answerInvite で続ける） */
@@ -56,6 +59,8 @@ export interface StepResult {
   match?: ScheduledMatch;
   /** 出来事の一言（仮の画面に出す） */
   notes: string[];
+  /** 見せる文章（マネージャーの台詞など。仮の画面では順に出す） */
+  messages?: Message[];
 }
 
 /** 練習試合の相手（仮。相手校の自動生成は第3段階。level は自チームと比べた強さ） */
@@ -90,6 +95,8 @@ export class Season {
   private queue: PendingEvent[] = [];
   /** 分かれ道で止まっている時の、残りの日数と使ったカード */
   private branchWait: { left: number; card: Card | null } | null = null;
+  /** 月初めを通り過ぎる時に一時停止している時の、残りの日数と使ったカード（練習指示を変えてから resume で続ける） */
+  private monthWait: { left: number; card: Card | null } | null = null;
   readonly events: EventDef[];
   private rng: Rng;
   private onPractice?: PracticeHook;
@@ -102,6 +109,10 @@ export class Season {
   measured: { id: string; cm: number }[] = [];
   /** 練習指示を変えられる状態（月初めに止まった時・練習指示カードを使った時。次に進むと閉じる）。4月1日は最初から開いている */
   practiceOpen = true;
+  /** 見せる文章（次の行動の結果で返す） */
+  private outbox: Message[] = [];
+  /** 合宿の最後の日を過ぎた（その日の練習の後に、終わりの台詞を出す） */
+  private campEnding = false;
   /** 予定している練習試合（1つまで） */
   scheduledMatch: ScheduledMatch | null = null;
   /** 申し込みカードを使って、相手を選ぶのを待っている3校 */
@@ -123,11 +134,35 @@ export class Season {
     this.rng = new Rng(o.seed * 131 + 17);
     this.onPractice = o.onPractice;
     for (let i = 0; i < HAND.size; i++) this.hand.push(this.draw());
-    // 1年目の6月に1回、マネージャーが練習試合を組む（説明の文章はイベントの中身の側で入れる）
-    if (this.year === 1) {
-      const d = this.saturdayFrom(indexOf(PRACTICE_MATCH.firstYear.month, PRACTICE_MATCH.firstYear.day));
-      this.scheduledMatch = { day: d, opponent: this.makeOpponent(), via: 'manager' };
-    }
+  }
+
+  /** 見せる文章をためる（行動の結果で返す） */
+  private say(text: string, speaker?: 'manager') {
+    this.outbox.push(speaker ? { speaker, text } : { text });
+  }
+
+  /** ためた文章を取り出す */
+  private drain(): { messages?: Message[] } {
+    if (!this.outbox.length) return {};
+    const messages = this.outbox;
+    this.outbox = [];
+    return { messages };
+  }
+
+  /** 日付の「〇日」 */
+  private dayOfMonth(day: number): number {
+    return dateOf(day).day;
+  }
+
+  /** 1年目の6月に1回、マネージャーが練習試合を組む（6月に入って最初に止まった時に知らせる） */
+  private managerMatch() {
+    if (this.year !== 1 || this.flags.managerMatchDone || this.scheduledMatch) return;
+    if (this.day < indexOf(6, 2) || this.date.month !== 6) return;
+    const d = this.saturdayFrom(indexOf(PRACTICE_MATCH.firstYear.month, PRACTICE_MATCH.firstYear.day));
+    const opponent = this.makeOpponent();
+    this.scheduledMatch = { day: d, opponent, via: 'manager' };
+    this.flags.managerMatchDone = true;
+    this.say(fill(TEXTS.managerMatch, { day: this.dayOfMonth(d), school: opponent.name }), 'manager');
   }
 
   /** 曜日（0＝日曜 … 6＝土曜） */
@@ -174,13 +209,17 @@ export class Season {
     if (!opp) throw new Error('その学校はありません');
     this.matchChoices = null;
     this.scheduledMatch = { day: this.saturdayFrom(this.day + 1), opponent: opp, via: 'card' };
+    return { text: fill(TEXTS.matchDecided, { school: opp.name, day: this.dayOfMonth(this.scheduledMatch.day) }) } as Message;
   }
 
   /** 他校からの申し込みに返事をする（受けると次の土曜日に試合） */
   answerInvite(accept: boolean) {
     if (!this.matchInvite) throw new Error('申し込みは来ていません');
-    if (accept) this.scheduledMatch = { day: this.saturdayFrom(this.day + 1), opponent: this.matchInvite, via: 'invite' };
+    const opp = this.matchInvite;
     this.matchInvite = null;
+    if (!accept) return null;
+    this.scheduledMatch = { day: this.saturdayFrom(this.day + 1), opponent: opp, via: 'invite' };
+    return { text: fill(TEXTS.matchDecided, { school: opp.name, day: this.dayOfMonth(this.scheduledMatch.day) }) } as Message;
   }
 
   /** 1枚引く。合宿中は練習カードだけ。練習試合申し込みカードは手札に1枚まで（使えない時期に手札が埋まらないように） */
@@ -230,7 +269,7 @@ export class Season {
     }
     if (card.special === 'matchOffer') {
       this.matchChoices = Array.from({ length: PRACTICE_MATCH.candidates }, () => this.makeOpponent());
-      return { moved: 0, matchChoices: this.matchChoices, notes: ['練習試合申し込みカード：相手を選んでください'] };
+      return { moved: 0, matchChoices: this.matchChoices, notes: ['練習試合申し込みカード'], messages: [{ text: TEXTS.matchAsk }] };
     }
     this.practiceOpen = false;
     return this.move(card.days, card);
@@ -275,6 +314,20 @@ export class Season {
     return this.move(left, card, true);
   }
 
+  /** 月初めを通り過ぎる途中で一時停止している */
+  get paused(): boolean {
+    return !!this.monthWait;
+  }
+
+  /** 月初めの一時停止から、残りの日数を進む（練習指示はここで閉じる） */
+  resume(): StepResult {
+    if (!this.monthWait) throw new Error('一時停止していません');
+    const { left, card } = this.monthWait;
+    this.monthWait = null;
+    this.practiceOpen = false;
+    return this.move(left, card);
+  }
+
   /** 起きているイベントの選択肢を選ぶ。続けて起きるイベントがあれば、それを返す */
   choose(index?: number): PendingEvent | null {
     if (!this.pending) throw new Error('イベントは起きていません');
@@ -301,6 +354,7 @@ export class Season {
     if (this.matchInvite) throw new Error('練習試合の申し込みに返事をしてください');
     if (this.pending) throw new Error('イベントの選択肢を先に選んでください');
     if (this.branchWait) throw new Error('分かれ道で道を選んでください');
+    if (this.monthWait) throw new Error('練習指示を変えたら、続きを進んでください');
     if (this.over) throw new Error('1年が終わりました');
   }
 
@@ -332,7 +386,7 @@ export class Season {
       if (next.lanes.length > 1 && this.board[this.day].lanes.length === 1 && !resumed) {
         this.branchWait = { left, card };
         this.afterDays(moved, card, notes, campMoved);
-        return { moved, needBranch: true, notes };
+        return { moved, needBranch: true, notes, ...this.drain() };
       }
       resumed = false;
       this.day++;
@@ -341,6 +395,7 @@ export class Season {
       left--;
       this.passDay(card);
       if (campOf(this.day) && card) campMoved++;
+      if (campOf(this.day) && !campOf(this.day + 1)) this.campEnding = true;
       const here = this.panelAt(this.day);
       // 月初め：練習指示を変える日。通り過ぎても止まる
       const first = dateOf(this.day).day === 1;
@@ -348,7 +403,15 @@ export class Season {
       const matchDay = this.scheduledMatch?.day === this.day;
       // 大会と練習試合の日は必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる（止まった時は下の land で起きる）
       const stop = here.kind === 'fixed' && !!FIXED_EVENTS.find(f => f.id === here.fixedId)?.stop;
-      if (first || stop || matchDay) break;
+      if (stop || matchDay) break;
+      // 月初めは一時停止するだけ（練習指示を変えてから残りの日数を進む）。ちょうど止まった時は普通に止まる
+      if (first && left > 0) {
+        if (here.kind === 'fixed') this.land(here, card, notes);
+        this.monthWait = { left, card };
+        this.afterDays(moved, card, notes, campMoved);
+        this.managerMatch();
+        return { moved, paused: true, practiceOpen: true, notes, ...this.drain() };
+      }
       if (here.kind === 'fixed' && left > 0) this.land(here, card, notes);
     }
     this.afterDays(moved, card, notes, campMoved);
@@ -363,7 +426,9 @@ export class Season {
     }
     const event = this.land(panel, card, notes);
     this.campHand();
+    this.managerMatch();
     return {
+      ...this.drain(),
       moved, panel, event: event ?? undefined, notes,
       ...(this.practiceOpen ? { practiceOpen: true } : {}),
       ...(this.matchInvite ? { matchInvite: this.matchInvite } : {}),
@@ -402,21 +467,28 @@ export class Season {
         this.campTrait(practice, notes);
       }
     }
+    if (this.campEnding) {
+      this.campEnding = false;
+      this.say(TEXTS.campEnd, 'manager');
+    }
   }
 
   /** 合宿の練習ごとに、確率でランダムな選手1人が、その練習の種類に合った特能を覚える */
   private campTrait(practice: PracticeDef, notes: string[]) {
-    if (!this.rng.chance(CAMP.traitChance)) return;
     const players = this.active();
     if (!players.length) return;
-    const p = this.rng.pick(players);
-    const role = bestRole(p);
-    const pool = Object.values(TRAITS).filter(t => t.kind === 'stat' && t.color === 'blue' && !t.upgradeOf && !t.alsoUnlocks
-      && (!t.roles || t.roles.includes(role)) && !p.traits.includes(t.id) && t.effects.some(e => practice.abilities.includes(e.ability as TrainKey)));
-    if (!pool.length) return;
-    const t = this.rng.pick(pool);
-    p.traits.push(t.id);
-    notes.push(`合宿：${p.number}番が特能「${t.name}」を覚えた`);
+    for (let i = 0; i < CAMP.traitRolls; i++) {
+      if (!this.rng.chance(CAMP.traitChance)) continue;
+      const p = this.rng.pick(players);
+      const role = bestRole(p);
+      const pool = Object.values(TRAITS).filter(t => t.kind === 'stat' && t.color === 'blue' && !t.upgradeOf && !t.alsoUnlocks
+        && (!t.roles || t.roles.includes(role)) && !p.traits.includes(t.id) && t.effects.some(e => practice.abilities.includes(e.ability as TrainKey)));
+      if (!pool.length) continue;
+      const t = this.rng.pick(pool);
+      p.traits.push(t.id);
+      notes.push(`合宿：${p.number}番が特能「${t.name}」を覚えた`);
+      this.say(fill(TEXTS.campTrait, { name: p.name, trait: t.name }));
+    }
   }
 
   /** 止まったマスのパネル */
@@ -440,9 +512,10 @@ export class Season {
         return null;
       case 'fixed': {
         const name = FIXED_EVENTS.find(f => f.id === panel.fixedId)?.name ?? panel.fixedId;
-        this.rosterEvent(panel.fixedId ?? '', notes);
+        // 結果を出すだけの行事（入学式・身体測定・引退・卒業式・合宿）は「中身はまだありません」を出さない
+        const system = this.rosterEvent(panel.fixedId ?? '', notes);
         const def = FIXED_EVENTS.find(f => f.id === panel.fixedId);
-        return this.trigger({ fixed: def?.kind ?? panel.fixedId }, `${name}（中身はまだありません）`, notes);
+        return this.trigger({ fixed: def?.kind ?? panel.fixedId }, system ? '' : `${name}（中身はまだありません）`, notes);
       }
       default: {
         // 白パネル：まれに他校から練習試合の申し込み（大会が近い時・もう予定がある時は来ない）
@@ -450,6 +523,7 @@ export class Season {
           && this.rng.chance(PRACTICE_MATCH.whiteInviteChance)) {
           this.matchInvite = this.makeOpponent();
           notes.push(`白：${this.matchInvite.name}から練習試合の申し込み`);
+          this.say(fill(TEXTS.matchInvite, { school: this.matchInvite.name }), 'manager');
           return null;
         }
         const names: Record<string, string> = { blue: '青', red: '赤', white: '白', training: '特訓' };
@@ -459,7 +533,8 @@ export class Season {
   }
 
   /** 行事のうち、部員の入れ替わりの仕組み（文章や選択肢はイベントの中身の側で入れる） */
-  private rosterEvent(id: string, notes: string[]) {
+  private rosterEvent(id: string, notes: string[]): boolean {
+    if (!['entrance', 'physical', 'retire', 'campSummer', 'campWinter', 'graduation'].includes(id)) return false;
     if (id === 'entrance') {
       this.newcomers = enroll(this.squad, this.year, this.gender, this.rng);
       notes.push(`新入生が${this.newcomers.length}人入部しました`);
@@ -471,11 +546,14 @@ export class Season {
       for (const p of n) p.retired = true;
       notes.push(`3年生${n.length}人が引退しました（卒業までは試合にも練習にも出ません）`);
     } else if (id === 'campSummer' || id === 'campWinter') {
-      notes.push(`${CAMP[id === 'campSummer' ? 'summer' : 'winter'].name}が始まりました（${CAMP.days}日間。練習カードだけになり、経験が多く入ります）`);
+      const k = id === 'campSummer' ? 'summer' : 'winter';
+      notes.push(`${CAMP[k].name}が始まりました`);
+      this.say(TEXTS.campStart[k], 'manager');
     } else if (id === 'graduation') {
       this.graduates = graduate(this.squad, this.year);
       notes.push(`3年生${this.graduates.length}人が卒業しました`);
     }
+    return true;
   }
 
   private trigger(t: { panel?: Panel['kind']; fixed?: string }, empty: string, notes: string[]): PendingEvent | null {
@@ -488,4 +566,21 @@ export class Season {
     if (!ev.def.choices?.length) this.choose();
     return ev;
   }
+}
+
+/**
+ * 分かれ道（lane の道を選ぶ）と月初めの一時停止（そのまま続ける）を、なくなるまで進める。
+ * 確認用スクリプト・テストで、1回の行動を最後まで進める時に使う
+ */
+export function finishStep(s: Season, r: StepResult, lane: 0 | 1 = 0): StepResult {
+  const notes = [...r.notes];
+  const messages = [...(r.messages ?? [])];
+  let moved = r.moved;
+  while (r.needBranch || r.paused) {
+    r = r.needBranch ? s.chooseBranch(lane) : s.resume();
+    notes.push(...r.notes);
+    messages.push(...(r.messages ?? []));
+    moved += r.moved;
+  }
+  return { ...r, moved, notes, ...(messages.length ? { messages } : {}) };
 }

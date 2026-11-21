@@ -2,7 +2,7 @@
 // 進め方：選手の体力の平均が下がったら休む。それ以外は手札の1枚目を使う。分かれ道は上の道。
 //   npx tsx scripts/grow-year.ts [種の数]
 
-import { Season } from '../src/grow/season';
+import { Season, finishStep } from '../src/grow/season';
 import { EQUIPMENT } from '../src/grow/practice';
 import { MONEY } from '../src/grow/constants';
 import { makeBench, makeTeam } from '../src/sim/sample';
@@ -37,8 +37,7 @@ function run(focus: boolean, buy: boolean): Result {
     let guard = 0;
     while (!s.over && guard++ < 1000) {
       const avg = sq.players.reduce((a, p) => a + p.energy, 0) / sq.players.length;
-      let res = avg < 45 ? (r.rests++, s.rest()) : s.useCard(s.firstUsable());
-      while (res.needBranch) res = s.chooseBranch(0);
+      finishStep(s, avg < 45 ? (r.rests++, s.rest()) : s.useCard(s.firstUsable()));
       while (s.pending) s.choose(0);
       if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);

@@ -8,6 +8,7 @@ import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
 import { SURNAMES } from '../grow/names';
 import type { MatchOpponent, StepResult } from '../grow/season';
+import { fill, TEXTS, type Message } from '../grow/texts';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
 import { gradeOf } from '../sim/player';
@@ -63,7 +64,8 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite;
+  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused;
+  ($('resume') as HTMLButtonElement).disabled = !season.paused;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
     const pr = PRACTICE[c.practiceId];
@@ -98,12 +100,27 @@ function render() {
 function after(r: StepResult) {
   const { month, day } = season.date;
   const where = r.panel ? `（${PANEL_NAME[r.panel.kind]}）` : '';
-  log.push(`${month}/${day}${where} ${r.notes.join('・')}`);
-  if (r.needBranch) openBranch();
-  else if (season.matchChoices) openMatchChoices();
-  else if (season.matchInvite) openInvite();
-  else if (season.pending) openEvent();
+  log.push(`${month}/${day}${where} ${r.notes.join('・')}${r.paused ? '（一時停止：練習指示を変えてから「続きを進む」）' : ''}`);
+  // 相手選び・申し込みの文章は、その画面の中で出す
+  const skip = new Set([TEXTS.matchAsk, season.matchInvite ? fill(TEXTS.matchInvite, { school: season.matchInvite.name }) : '']);
+  showMessages((r.messages ?? []).filter(m => !skip.has(m.text)), () => {
+    if (r.needBranch) openBranch();
+    else if (season.matchChoices) openMatchChoices();
+    else if (season.matchInvite) openInvite();
+    else if (season.pending) openEvent();
+    render();
+  });
   render();
+}
+
+/** 文章（マネージャーの台詞など）を1つずつ出す。全部見たら then */
+function showMessages(list: Message[], then: () => void) {
+  if (!list.length) { then(); return; }
+  const [m, ...rest] = list;
+  $('modalBox').innerHTML = `<div class="text">${m.speaker === 'manager' ? 'マネージャー「' + m.text + '」' : m.text}</div>
+    <div class="choices"><button id="ok">OK</button></div>`;
+  $('modal').classList.remove('hidden');
+  ($('ok') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); showMessages(rest, then); };
 }
 
 /** 分かれ道：どちらの道を通るか（それぞれの道の先のマスを見せる） */
@@ -123,11 +140,11 @@ const LEVEL_NAME: Record<MatchOpponent['level'], string> = { above: '格上', eq
 /** 練習試合申し込みカード：3校から相手を選ぶ（次の土曜日に試合） */
 function openMatchChoices() {
   const list = season.matchChoices!;
-  $('modalBox').innerHTML = `<div class="text">練習試合の相手を選んでください（次の土曜日に試合）</div><div class="choices" id="choices"></div>`;
+  $('modalBox').innerHTML = `<div class="text">${TEXTS.matchAsk}</div><div class="choices" id="choices"></div>`;
   list.forEach((o, i) => {
     const b = document.createElement('button');
     b.textContent = `${o.name}（${LEVEL_NAME[o.level]}）`;
-    b.onclick = () => { season.chooseMatch(i); log.push(`練習試合の相手：${o.name}`); closeModal(); };
+    b.onclick = () => { const m = season.chooseMatch(i); log.push(`練習試合の相手：${o.name}`); $('modal').classList.add('hidden'); showMessages([m], closeModal); };
     $('choices').appendChild(b);
   });
   $('modal').classList.remove('hidden');
@@ -136,10 +153,10 @@ function openMatchChoices() {
 /** 白パネル：他校から練習試合の申し込み */
 function openInvite() {
   const o = season.matchInvite!;
-  $('modalBox').innerHTML = `<div class="text">${o.name}（${LEVEL_NAME[o.level]}）から練習試合の申し込みが来ました（次の土曜日）</div>
+  $('modalBox').innerHTML = `<div class="text">マネージャー「${fill(TEXTS.matchInvite, { school: o.name })}」（${LEVEL_NAME[o.level]}）</div>
     <div class="choices"><button id="yes">受ける</button><button id="no">断る</button></div>`;
   $('modal').classList.remove('hidden');
-  ($('yes') as HTMLButtonElement).onclick = () => { season.answerInvite(true); log.push(`練習試合を受けた：${o.name}`); closeModal(); };
+  ($('yes') as HTMLButtonElement).onclick = () => { const m = season.answerInvite(true); log.push(`練習試合を受けた：${o.name}`); $('modal').classList.add('hidden'); showMessages(m ? [m] : [], closeModal); };
   ($('no') as HTMLButtonElement).onclick = () => { season.answerInvite(false); log.push('練習試合を断った'); closeModal(); };
 }
 
@@ -231,6 +248,7 @@ function openGraduates() {
   render();
 };
 ($('rest') as HTMLButtonElement).onclick = () => after(season.rest());
+($('resume') as HTMLButtonElement).onclick = () => after(season.resume());
 ($('newYear') as HTMLButtonElement).onclick = () => {
   seed++;
   career = new Career({ seed, squad: newSquad() });
