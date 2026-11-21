@@ -5,11 +5,12 @@
 // 描画は知らない。仮の画面（grow.html）はこの状態を見て操作するだけ。
 
 import { Rng } from '../sim/rng';
-import type { Player, Squad } from '../sim/types';
+import type { Gender, Player, Squad } from '../sim/types';
 import { dateOf, makeBoard, type BoardDay, type Panel } from './board';
 import { drawCard, PRACTICE, type Card, type PracticeDef, type TeamPolicy } from './cards';
 import { DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, YELLOW_BONUS } from './constants';
 import { applyPractice, dailyCondition, EQUIPMENT, gymLevel } from './practice';
+import { enroll, graduate, measure, type Graduate } from './roster';
 import { EVENTS, pickEvent, resolveEvent, type EventDef, type EventWorld, type PendingEvent } from './events';
 
 /** 練習を渡す口：使ったカードの練習・練習した日数・経験値の倍率（黄パネルで増える）・練習した選手 */
@@ -19,7 +20,11 @@ export interface SeasonOptions {
   seed: number;
   squad: Squad;
   year?: number;
+  /** 男女（新入生を作る時に使う） */
+  gender?: Gender;
   policy?: TeamPolicy;
+  /** 印（年度をまたいで引き継ぐ） */
+  flags?: Record<string, boolean>;
   money?: number;
   /** 持っている機材（ID） */
   equipment?: string[];
@@ -65,12 +70,20 @@ export class Season {
   private rng: Rng;
   private onPractice?: PracticeHook;
   log: string[] = [];
+  readonly gender: Gender;
+  /** この年度に卒業した選手（卒業式で入る。名簿は育成全体の側で持つ） */
+  graduates: Graduate[] = [];
+  /** この年度に入部した選手と、身体測定の結果（仮の画面で見せる用） */
+  newcomers: Player[] = [];
+  measured: { id: string; cm: number }[] = [];
 
   constructor(o: SeasonOptions) {
     this.board = makeBoard(o.seed);
     this.year = o.year ?? 1;
     this.squad = o.squad;
     this.policy = o.policy ?? 'all';
+    this.gender = o.gender ?? 'male';
+    this.flags = o.flags ?? {};
     // 年度の初めに部費が入る（評判による増減は第3段階で）
     this.money = o.money ?? MONEY.budget;
     this.equipment = [...(o.equipment ?? [])];
@@ -246,12 +259,27 @@ export class Season {
         return null;
       case 'fixed': {
         const name = FIXED_EVENTS.find(f => f.id === panel.fixedId)?.name ?? panel.fixedId;
+        this.rosterEvent(panel.fixedId ?? '', notes);
         return this.trigger({ fixed: panel.fixedId }, `${name}（中身はまだありません）`, notes);
       }
       default: {
         const names: Record<string, string> = { blue: '青', red: '赤', white: '白', training: '特訓' };
         return this.trigger({ panel: panel.kind }, `${names[panel.kind]}パネル（イベントの中身はまだありません）`, notes);
       }
+    }
+  }
+
+  /** 行事のうち、部員の入れ替わりの仕組み（文章や選択肢はイベントの中身の側で入れる） */
+  private rosterEvent(id: string, notes: string[]) {
+    if (id === 'entrance') {
+      this.newcomers = enroll(this.squad, this.year, this.gender, this.rng);
+      notes.push(`新入生が${this.newcomers.length}人入部しました`);
+    } else if (id === 'physical') {
+      this.measured = measure(this.squad, this.year);
+      notes.push(`身体測定：${this.measured.length ? this.measured.map(m => `${this.squad.players.find(p => p.id === m.id)!.number}番 +${m.cm}cm`).join('、') : '身長が伸びた選手はいません'}`);
+    } else if (id === 'graduation') {
+      this.graduates = graduate(this.squad, this.year);
+      notes.push(`3年生${this.graduates.length}人が卒業しました`);
     }
   }
 

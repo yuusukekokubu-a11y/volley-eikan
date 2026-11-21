@@ -63,12 +63,12 @@ export const FIXED_EVENTS: { id: string; name: string; month: number; day: numbe
  */
 export const PRACTICE_GAIN = {
   /** 1つの能力を伸ばす練習の、1日あたりの経験の基本量 */
-  base: 0.32,
+  base: 0.19,
   /**
    * 練習指示は「伸びる量を寄せる」選択：指示した能力と違う能力の練習では、その経験の focusShift の割合が
    * 指示した能力に回る（回る量は元の能力の伸びにくさで決まるので、合計はおまかせと同じ）。指示した能力の練習では、そのまま入る
    */
-  focusShift: 0.4,
+  focusShift: 0.07,
   /** 総合練習・紅白戦：6能力それぞれに入る割合 */
   generalShare: 0.25,
   /** 高効率カード：2つの能力それぞれに入る倍率 */
@@ -86,8 +86,10 @@ export const GYM = {
   points: { basic: 1, advanced: 2 },
   /** レベル＝ 1 ＋ 点の合計 ÷ perLevel（切り捨て） */
   perLevel: 1,
-  /** 1レベルあたり、すべての練習の経験が増える割合（買ったら差がはっきり分かる大きさ） */
-  perLevelGain: 0.12,
+  /** 1レベルあたり、すべての練習の経験が増える割合 */
+  perLevelGain: 0.06,
+  /** 上限。機材を全部そろえた時（下位6点＋上位12点＝18点）のレベル。経験は 1 ＋ 18 × perLevelGain 倍 */
+  maxLevel: 19,
 };
 
 /** お金（単位：円）。部費（年度の初めに入る）と、試合の勝利の報奨（後援会・OB会からの支援） */
@@ -114,4 +116,19 @@ export const CONDITION = {
   /** ムラっ気：普通から外れやすく（leaveNormal の倍率）、戻りにくい（普通の方へ戻る確率） */
   moodyLeave: 2.5,
   moodyToward: 0.6,
+};
+
+/** 部員の入れ替わり（新入生・卒業・身体測定）。本家と同じく人数と能力はランダム。評判による増減は第3段階で */
+export const ROSTER = {
+  /** 新入生の人数（毎年この範囲で決まる） */
+  newcomers: { min: 4, max: 7 },
+  /** 新入生の能力の平均とばらつき */
+  newcomerAvg: 35,
+  newcomerSpread: 8,
+  /** 新入生の本職の出やすさ */
+  roleWeights: { S: 2, OH: 4, MB: 3, OP: 2, L: 2 } as Record<'S' | 'OH' | 'MB' | 'OP' | 'L', number>,
+  /** 新入生が特能を1つ持って入ってくる確率（青・赤。サーブの解禁・金・緑は持たない） */
+  traitChance: { blue: 0.12, red: 0.1 },
+  /** 身体測定：身長の伸びしろのうち、2年の4月に伸びる割合（残りは3年の4月）。1年は入学したばかりで伸びない */
+  heightShareSecond: 0.6,
 };

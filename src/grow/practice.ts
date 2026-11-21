@@ -15,7 +15,7 @@ export const EQUIPMENT: PracticeDef[] = PRACTICES.filter(p => p.equipment !== 'n
 /** 体育館レベル：持っている機材の数と種類で決まる（上位機材ほど多く上がる）。機材は壊れない */
 export function gymLevel(owned: string[]): number {
   const points = owned.reduce((s, id) => s + (PRACTICE[id] ? GYM.points[PRACTICE[id].equipment as Exclude<Equipment, 'none'>] ?? 0 : 0), 0);
-  return 1 + Math.floor(points / GYM.perLevel);
+  return Math.min(GYM.maxLevel, 1 + Math.floor(points / GYM.perLevel));
 }
 
 /** 体育館レベルによる経験の倍率 */

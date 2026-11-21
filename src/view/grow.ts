@@ -5,7 +5,10 @@ import { FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
 import { abilityRank } from './common';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
-import { Season, type StepResult } from '../grow/season';
+import { Career } from '../grow/career';
+import { SURNAMES } from '../grow/names';
+import type { StepResult } from '../grow/season';
+import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
 import { gradeOf } from '../sim/player';
 import { makeBench, makeTeam } from '../sim/sample';
@@ -23,10 +26,15 @@ const ABILITY_NAME: Record<string, string> = { jump: '跳躍', power: 'パワー
 
 function newSquad(): Squad {
   const t = makeTeam(seed, 'A', 'male', 55);
-  return { players: [...t.rotation.map(s => s.player), t.libero!, ...makeBench(seed, 'A', 'male', 55)], captainId: null };
+  const players = [...t.rotation.map(s => s.player), t.libero!, ...makeBench(seed, 'A', 'male', 55)];
+  // 試作用の部員にも名字を付ける
+  const rng = new Rng(seed * 3 + 1);
+  for (const p of players) p.name = rng.pick(SURNAMES);
+  return { players, captainId: null };
 }
 
-let season = new Season({ seed, squad: newSquad() });
+let career = new Career({ seed, squad: newSquad() });
+let season = career.season;
 const log: string[] = [];
 
 const bestRole = (p: Player): Role => (Object.entries(p.aptitude) as [Role, number][]).sort((a, b) => b[1] - a[1])[0][0];
@@ -42,7 +50,7 @@ function dayCol(d: BoardDay, here: boolean): string {
 
 function render() {
   const { month, day } = season.date;
-  $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました）' : ''}`;
+  $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました。「次の年へ」で新しい年度に進みます）' : ''}`;
   $('money').textContent = `お金 ${season.money.toLocaleString()}円`;
   $('gym').textContent = `体育館レベル ${season.gym}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
@@ -64,17 +72,19 @@ function render() {
     $('hand').appendChild(b);
   });
   ($('rest') as HTMLButtonElement).disabled = busy;
+  ($('nextYear') as HTMLButtonElement).disabled = !season.over;
   // 選手：能力（段階＋数値）、体力、調子、練習指示（押すと変える）
   const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
   const COND = ['絶不調', '不調', '普通', '好調', '絶好調'];
   const rows = season.squad.players.map(p => {
     const ab = KEYS.map(k => `<td>${abilityRank(p[k])}${p[k]}</td>`).join('');
     const focus = p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus];
-    return `<tr><td>${p.number}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
+    const isNew = season.newcomers.includes(p) ? '（新）' : '';
+    return `<tr><td>${p.number}</td><td>${p.name}${isNew}</td><td>${p.height}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
       <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}</td><td>${COND[p.condition + 2]}</td>
       <td><button class="small" data-pr="${p.id}">${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button></td></tr>`;
   }).join('');
-  $('squad').innerHTML = `<tr><th>番</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;
+  $('squad').innerHTML = `<tr><th>番</th><th>名前</th><th>身長</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;
   for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pr]'))) {
     b.onclick = () => openPractice(b.getAttribute('data-pr')!);
   }
@@ -164,11 +174,30 @@ function openShop() {
   $('modal').classList.remove('hidden');
 }
 
+/** 卒業生の名簿 */
+function openGraduates() {
+  const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
+  const rows = career.graduates.concat(season.graduates).map(g =>
+    `<tr><td>${g.gradYear}年目</td><td>${g.number}</td><td>${g.name}</td><td>${ROLE_NAME[g.role].slice(0, 3)}</td><td>${g.height}</td>${KEYS.map(k => `<td>${abilityRank(g.abilities[k])}${g.abilities[k]}</td>`).join('')}</tr>`).join('');
+  $('modalBox').innerHTML = `<div class="text">卒業生の名簿</div>
+    <div style="max-height:250px;overflow-y:auto"><table>${rows ? `<tr><th>卒業</th><th>番</th><th>名前</th><th>位置</th><th>身長</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}</tr>${rows}` : '<tr><td>まだいません</td></tr>'}</table></div>
+    <div class="choices"><button id="close">閉じる</button></div>`;
+  ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+  $('modal').classList.remove('hidden');
+}
+
 ($('shop') as HTMLButtonElement).onclick = openShop;
+($('grads') as HTMLButtonElement).onclick = openGraduates;
+($('nextYear') as HTMLButtonElement).onclick = () => {
+  season = career.nextYear();
+  log.push(`${season.year}年目が始まりました（部費 ${MONEY.budget.toLocaleString()}円）`);
+  render();
+};
 ($('rest') as HTMLButtonElement).onclick = () => after(season.rest());
 ($('newYear') as HTMLButtonElement).onclick = () => {
   seed++;
-  season = new Season({ seed, squad: newSquad() });
+  career = new Career({ seed, squad: newSquad() });
+  season = career.season;
   log.length = 0;
   render();
 };
