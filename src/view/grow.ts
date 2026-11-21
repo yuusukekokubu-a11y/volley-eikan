@@ -1,5 +1,5 @@
 // 育成（双六）の仮の画面。見た目は第4段階で作り込む。
-// 手札から進行カードを選んで進む。止まったマスのパネル・イベントの結果と、選手の体力・怪我を見せる。
+// 手札から進行カードを選んで進む。止まったマスのパネル・イベントの結果と、選手の体力・調子を見せる。
 
 import { FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
@@ -64,15 +64,14 @@ function render() {
     $('hand').appendChild(b);
   });
   ($('rest') as HTMLButtonElement).disabled = busy;
-  // 選手：能力（段階＋数値）、体力、調子、怪我、練習指示（押すと変える）
+  // 選手：能力（段階＋数値）、体力、調子、練習指示（押すと変える）
   const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
   const COND = ['絶不調', '不調', '普通', '好調', '絶好調'];
   const rows = season.squad.players.map(p => {
-    const hurt = p.injuryDays > 0 ? ` <span class="hurt">怪我${p.injuryDays}日</span>` : '';
     const ab = KEYS.map(k => `<td>${abilityRank(p[k])}${p[k]}</td>`).join('');
     const focus = p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus];
     return `<tr><td>${p.number}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
-      <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}${hurt}</td><td>${COND[p.condition + 2]}</td>
+      <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}</td><td>${COND[p.condition + 2]}</td>
       <td><button class="small" data-pr="${p.id}">${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button></td></tr>`;
   }).join('');
   $('squad').innerHTML = `<tr><th>番</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;

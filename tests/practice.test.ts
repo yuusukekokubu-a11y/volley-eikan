@@ -10,18 +10,30 @@ import type { Squad } from '../src/sim/types';
 const player = () => makePlayer(new Rng(3), 'P', 1, 'OH', 'male', 50);
 
 describe('練習', () => {
-  it('練習指示とカードの能力が合うとよく伸び、違うと少し伸びる（おまかせはその間）', () => {
+  it('練習指示は伸びる量を寄せる：指示した能力がよく伸び、合計はおまかせと同じ（伸びにくさが同じなら）', () => {
     const p = player();
-    const dash = PRACTICE.dash;
-    p.practice.focus = 'speed';
-    const match = practiceGain(p, dash, 1).speed!;
+    for (const k of ['jump', 'power', 'speed', 'technique', 'block', 'stamina'] as const) p[k] = 50;
+    const sum = (g: Record<string, number | undefined>) => Object.values(g).reduce((a, b) => a! + b!, 0)!;
     p.practice.focus = 'auto';
-    const auto = practiceGain(p, dash, 1).speed!;
+    const auto = practiceGain(p, PRACTICE.dash, 1);
     p.practice.focus = 'power';
-    const miss = practiceGain(p, dash, 1).speed!;
-    expect(match).toBeGreaterThan(auto);
-    expect(auto).toBeGreaterThan(miss);
-    expect(miss).toBeGreaterThan(0);
+    const focus = practiceGain(p, PRACTICE.dash, 1);
+    expect(focus.power!).toBeGreaterThan(0);
+    expect(focus.speed!).toBeLessThan(auto.speed!);
+    expect(sum(focus)).toBeCloseTo(sum(auto));
+    // 指示した能力の練習なら、そのまま入る
+    p.practice.focus = 'speed';
+    expect(practiceGain(p, PRACTICE.dash, 1).speed!).toBeCloseTo(auto.speed!);
+  });
+
+  it('体力が低いほど練習の伸びが落ちる（体力0でも7割）', () => {
+    const p = player();
+    p.energy = 100;
+    const full = practiceGain(p, PRACTICE.dash, 1).speed!;
+    p.energy = 50;
+    expect(practiceGain(p, PRACTICE.dash, 1).speed!).toBeCloseTo(full);
+    p.energy = 0;
+    expect(practiceGain(p, PRACTICE.dash, 1).speed!).toBeCloseTo(full * 0.7);
   });
 
   it('能力が高いほど伸びにくく、100で止まる', () => {
@@ -37,9 +49,9 @@ describe('練習', () => {
 
   it('体育館レベルは持っている機材で決まり、上位機材ほど多く上がる。レベルが高いほど経験が増える', () => {
     expect(gymLevel([])).toBe(1);
-    expect(gymLevel(['dumbbell', 'jumpBox'])).toBe(2);
-    expect(gymLevel(['barbell'])).toBe(2);
-    expect(gymLevel(['barbell', 'jumpMeter', 'ballMachine'])).toBe(4);
+    expect(gymLevel(['dumbbell'])).toBe(2);
+    expect(gymLevel(['barbell'])).toBe(3);
+    expect(gymLevel(['barbell', 'jumpMeter', 'dumbbell'])).toBe(6);
     const p = player();
     expect(practiceGain(p, PRACTICE.core, 4).power!).toBeCloseTo(practiceGain(p, PRACTICE.core, 1).power! * gymMul(4) / gymMul(1));
   });
@@ -77,25 +89,12 @@ describe('練習', () => {
     expect(s.money).toBe(MONEY.budget);
     s.buy('barbell');
     expect(s.money).toBe(MONEY.budget - MONEY.price.advanced);
-    expect(s.gym).toBe(2);
+    expect(s.gym).toBe(3);
     expect(() => s.buy('barbell')).toThrow();
     s.money = 0;
     expect(() => s.buy('dumbbell')).toThrow();
     expect(s.rewardWin('practice')).toBe(MONEY.winPractice);
     expect(s.rewardWin('tournament', 3)).toBeGreaterThan(s.rewardWin('tournament', 1));
-  });
-
-  it('怪我をしている選手は練習しない（伸びない）', () => {
-    const t = makeTeam(2, 'A', 'male', 55);
-    const squad: Squad = { players: [...t.rotation.map(s => s.player), t.libero!], captainId: null };
-    const hurt = squad.players[0];
-    hurt.injuryDays = 999;
-    const exp = { ...hurt.exp };
-    const vals = { jump: hurt.jump, power: hurt.power, speed: hurt.speed, technique: hurt.technique, block: hurt.block, stamina: hurt.stamina };
-    const s = new Season({ seed: 2, squad, events: [] });
-    for (let i = 0; i < 10; i++) { const r = s.useCard(0); if (r.needBranch) s.chooseBranch(0); }
-    expect(hurt.exp).toEqual(exp);
-    expect({ jump: hurt.jump, power: hurt.power, speed: hurt.speed, technique: hurt.technique, block: hurt.block, stamina: hurt.stamina }).toEqual(vals);
   });
 
   it('調子：たいていは普通。安定感は普通の日が多く、ムラっ気は少ない', () => {

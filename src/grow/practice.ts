@@ -7,7 +7,7 @@ import type { Rng } from '../sim/rng';
 import { hasTrait } from '../sim/traits';
 import type { Player, TrainKey } from '../sim/types';
 import { PRACTICE, PRACTICES, type Equipment, type PracticeDef } from './cards';
-import { CONDITION, GYM, PRACTICE_GAIN } from './constants';
+import { CONDITION, ENERGY, GYM, PRACTICE_GAIN } from './constants';
 
 /** 機材（練習の種類のうち、機材を使うもの）。持っていると、その練習のカードが手札に出る */
 export const EQUIPMENT: PracticeDef[] = PRACTICES.filter(p => p.equipment !== 'none');
@@ -28,21 +28,31 @@ function growth(v: number): number {
   return Math.max(PRACTICE_GAIN.min, PRACTICE_GAIN.pivot - v * PRACTICE_GAIN.slope);
 }
 
-/** 1日の練習で入る経験（能力ごと）。mul は黄パネルの倍率など */
+/** 体力が低いほど練習の伸びが落ちる（体力0でも 1 − lowPenalty） */
+export function energyMul(energy: number): number {
+  return 1 - ENERGY.lowPenalty * Math.max(0, ENERGY.lowFrom - energy) / ENERGY.lowFrom;
+}
+
+/**
+ * 1日の練習で入る経験（能力ごと）。mul は黄パネルの倍率など。
+ * 練習指示は「伸びる量を寄せる」：指示した能力と違う能力の練習では、経験の一部が指示した能力に回る（合計は変わらない）
+ */
 export function practiceGain(p: Player, practice: PracticeDef, level: number, mul = 1): Partial<Record<TrainKey, number>> {
   const out: Partial<Record<TrainKey, number>> = {};
-  const g = gymMul(level) * mul;
+  const g = gymMul(level) * energyMul(p.energy) * mul;
   const focus = p.practice.focus;
   const share = practice.kind === 'general' ? PRACTICE_GAIN.generalShare : practice.kind === 'efficient' ? PRACTICE_GAIN.efficient : 1;
+  const add = (k: TrainKey, v: number) => { out[k] = (out[k] ?? 0) + v; };
   for (const a of practice.abilities) {
-    // 指示と合えばよく伸び、違えば少し伸びる。総合練習は指示に関係なく少しずつ
-    const fit = practice.kind === 'general' || focus === 'auto' ? PRACTICE_GAIN.auto : focus === a ? PRACTICE_GAIN.match : PRACTICE_GAIN.mismatch;
-    out[a] = PRACTICE_GAIN.base * share * fit * growth(p[a]) * g;
+    const amount = PRACTICE_GAIN.base * share * g;
+    if (focus === 'auto' || focus === a) { add(a, amount * growth(p[a])); continue; }
+    add(a, amount * (1 - PRACTICE_GAIN.focusShift) * growth(p[a]));
+    add(focus, amount * PRACTICE_GAIN.focusShift * growth(p[a]));
   }
   return out;
 }
 
-/** 練習する（怪我をしていない選手だけ渡す）。days 日分の経験と、練習するポジションの適性の経験を足す */
+/** 練習する。days 日分の経験と、練習するポジションの適性の経験を足す */
 export function applyPractice(players: Player[], practice: PracticeDef, days: number, level: number, mul = 1) {
   for (const p of players) {
     for (let d = 0; d < days; d++) {

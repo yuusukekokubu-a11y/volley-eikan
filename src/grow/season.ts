@@ -1,5 +1,6 @@
 // 1年の進行（双六）。手札から進行カードを1枚選び、書いてある日数だけ進んで、止まったマスのパネル・イベントが起きる。
-// 練習の効果は practice.ts。育成用の体力は練習で減り、緑パネルや休みで回復する。調子は日々少しずつ変わる。
+// 練習の効果は practice.ts。育成用の体力は練習で減り、緑パネルや休みで回復する（低いほど練習の伸びが落ちる）。
+// 練習できなくなる「怪我の状態」はない。怪我はイベントの効果の1つ（events.ts）。調子は日々少しずつ変わる。
 // お金：部費（年度の初めに入る）と、試合の勝利の報奨。機材を買うと体育館レベルが上がる。
 // 描画は知らない。仮の画面（grow.html）はこの状態を見て操作するだけ。
 
@@ -150,7 +151,7 @@ export class Season {
   choose(index?: number): PendingEvent | null {
     if (!this.pending) throw new Error('イベントは起きていません');
     const w = this.world();
-    this.pending = resolveEvent(this.pending, w, this.events, index) ?? this.queue.shift() ?? null;
+    this.pending = resolveEvent(this.pending, w, this.events, this.rng, index) ?? this.queue.shift() ?? null;
     this.money = w.money;
     // 待っていたイベントが選択肢のないものなら、すぐに効果をかけて次へ
     if (this.pending && !this.pending.def.choices?.length) return this.choose();
@@ -192,7 +193,7 @@ export class Season {
       if (this.board[this.day].lanes.length === 1) this.lane = 0;
       moved++;
       left--;
-      this.passDay(card, notes);
+      this.passDay(card);
       const here = this.panelAt(this.day);
       if (here.kind === 'fixed') {
         // 大会は必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる（止まった時は下の land で起きる）
@@ -206,35 +207,19 @@ export class Season {
     return { moved, panel, event: event ?? undefined, notes };
   }
 
-  /** 1日が過ぎる：練習（体力が減り、減っていると怪我をしやすい）か休み。怪我は1日ずつ治る。調子が少し変わる */
-  private passDay(card: Card | null, notes: string[]) {
+  /** 1日が過ぎる：練習（体力が減る）か休み（体力が回復する）。調子が少し変わる */
+  private passDay(card: Card | null) {
     for (const p of this.players()) {
       dailyCondition(p, this.rng);
-      if (p.injuryDays > 0) {
-        p.injuryDays--;
-        p.energy = Math.min(ENERGY.max, p.energy + ENERGY.rest);
-        continue;
-      }
-      if (!card) {
-        p.energy = Math.min(ENERGY.max, p.energy + ENERGY.rest);
-        continue;
-      }
-      p.energy = Math.max(0, p.energy - ENERGY.perPracticeDay);
-      // 体力が減っていると、練習で怪我をしやすい
-      const risk = Math.max(0, ENERGY.injuryBelow - p.energy) * ENERGY.injuryPerPoint;
-      if (risk > 0 && this.rng.chance(risk)) {
-        const [lo, hi] = ENERGY.injuryDays;
-        p.injuryDays = lo + Math.floor(this.rng.range(0, hi - lo + 1));
-        notes.push(`${p.number}番が怪我をした（${p.injuryDays}日）`);
-      }
+      p.energy = card ? Math.max(0, p.energy - ENERGY.perPracticeDay) : Math.min(ENERGY.max, p.energy + ENERGY.rest);
     }
   }
 
-  /** 進んだ日数分の練習をする（怪我をしていない選手だけ） */
+  /** 進んだ日数分の練習をする */
   private afterDays(moved: number, card: Card | null, notes: string[], mul = 1) {
     if (!card || moved === 0) return;
     const practice = PRACTICE[card.practiceId];
-    const players = this.players().filter(p => p.injuryDays === 0);
+    const players = this.players();
     applyPractice(players, practice, moved, this.gym, mul);
     this.onPractice?.(practice, moved, mul, players);
     notes.push(`${practice.name}を${moved}日`);
@@ -251,7 +236,7 @@ export class Season {
         // 練習の進行カードで止まると、その練習の経験値が増える
         if (card) {
           const practice = PRACTICE[card.practiceId];
-          const players = this.players().filter(p => p.injuryDays === 0);
+          const players = this.players();
           applyPractice(players, practice, 1, this.gym, YELLOW_BONUS - 1);
           this.onPractice?.(practice, 1, YELLOW_BONUS - 1, players);
           notes.push(`黄：${practice.name}の経験値が増えた`);

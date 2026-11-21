@@ -20,7 +20,6 @@ export type Cond =
   | { kind: 'role'; in: Role[] }             // 対象の選手のポジション（一番適性の高い位置）
   | { kind: 'flag'; name: string; is: boolean }
   | { kind: 'energyBelow'; value: number }   // 対象の選手の育成用の体力
-  | { kind: 'injured'; is: boolean }         // 対象の選手が怪我をしているか
   | { kind: 'moneyAtLeast'; value: number };
 
 /** 効果。target を省くと、対象の選手（いなければチーム全体） */
@@ -30,7 +29,8 @@ export type Effect = (
   | { kind: 'condition'; delta: number }                    // 調子（-2〜+2）
   | { kind: 'trust'; delta: number }                        // 信頼度
   | { kind: 'energy'; delta: number }                       // 育成用の体力
-  | { kind: 'injury'; days: number }                        // 怪我（残り日数）
+  // 怪我：chance の確率で起き、能力・体力・調子が少し下がる（練習できなくなる状態はない）。体力が低いほど起きやすい
+  | { kind: 'injury'; chance: number; abilities?: Partial<Record<TrainKey, number>>; energy?: number; condition?: number }
   | { kind: 'traitProgress'; id: string; delta: number }    // 特能のきっかけ
   | { kind: 'gainTrait'; id: string }                       // 特能を覚える
   | { kind: 'money'; delta: number }                        // お金（稼ぎ方は「練習」の段階で相談。今は種類として持つだけ）
@@ -85,7 +85,6 @@ function checkCond(c: Cond, w: EventWorld, p?: Player): boolean {
     case 'grade': return !!p && c.in.includes(gradeOf(p, w.year));
     case 'role': return !!p && c.in.includes(bestRole(p));
     case 'energyBelow': return !!p && p.energy < c.value;
-    case 'injured': return !!p && (p.injuryDays > 0) === c.is;
   }
 }
 
@@ -112,8 +111,14 @@ function start(def: EventDef, subject?: Player): PendingEvent {
   return { def, subjectId: subject?.id, text };
 }
 
-/** 効果をかける */
-export function applyEffects(effects: Effect[], w: EventWorld, subjectId?: string) {
+/** 怪我の起きやすさ：体力が低いほど高い（体力0で ENERGY.injuryLowMul 倍） */
+export function injuryChance(base: number, energy: number): number {
+  const low = Math.max(0, ENERGY.lowFrom - energy) / ENERGY.lowFrom;
+  return Math.min(1, base * (1 + (ENERGY.injuryLowMul - 1) * low));
+}
+
+/** 効果をかける。怪我のように確率で起きる効果には rng を使う */
+export function applyEffects(effects: Effect[], w: EventWorld, subjectId: string | undefined, rng: Rng) {
   const subject = w.players.find(p => p.id === subjectId);
   for (const e of effects) {
     const targets = e.target === 'team' || !subject ? w.players : [subject];
@@ -128,7 +133,13 @@ export function applyEffects(effects: Effect[], w: EventWorld, subjectId?: strin
         case 'condition': p.condition = Math.max(-2, Math.min(2, p.condition + e.delta)); break;
         case 'trust': p.trust = Math.max(0, Math.min(100, p.trust + e.delta)); break;
         case 'energy': p.energy = Math.max(0, Math.min(ENERGY.max, p.energy + e.delta)); break;
-        case 'injury': p.injuryDays = Math.max(p.injuryDays, e.days); break;
+        case 'injury': {
+          if (!rng.chance(injuryChance(e.chance, p.energy))) break;
+          for (const [k, v] of Object.entries(e.abilities ?? {})) p[k as TrainKey] = Math.max(1, Math.min(100, p[k as TrainKey] + v!));
+          if (e.energy) p.energy = Math.max(0, Math.min(ENERGY.max, p.energy + e.energy));
+          if (e.condition) p.condition = Math.max(-2, Math.min(2, p.condition + e.condition));
+          break;
+        }
         case 'traitProgress': p.traitProgress[e.id] = (p.traitProgress[e.id] ?? 0) + e.delta; break;
         case 'gainTrait': if (!p.traits.includes(e.id)) p.traits.push(e.id); break;
       }
@@ -139,10 +150,10 @@ export function applyEffects(effects: Effect[], w: EventWorld, subjectId?: strin
 /**
  * 選択肢を選ぶ（選択肢のないイベントは index を省く）。効果をかけ、続けて起きるイベントがあれば返す
  */
-export function resolveEvent(ev: PendingEvent, w: EventWorld, defs: EventDef[], index?: number): PendingEvent | null {
+export function resolveEvent(ev: PendingEvent, w: EventWorld, defs: EventDef[], rng: Rng, index?: number): PendingEvent | null {
   const choice = ev.def.choices && index !== undefined ? ev.def.choices[index] : undefined;
   if (ev.def.choices?.length && !choice) throw new Error('選択肢を選んでください');
-  applyEffects(choice ? choice.effects : ev.def.effects ?? [], w, ev.subjectId);
+  applyEffects(choice ? choice.effects : ev.def.effects ?? [], w, ev.subjectId, rng);
   const nextId = choice?.next;
   if (!nextId) return null;
   const next = defs.find(d => d.id === nextId);

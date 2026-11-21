@@ -1,5 +1,5 @@
 // 育成の確認用：1年分を自動で回して、能力の伸びを見る。
-// 進め方：怪我をしていない選手の体力の平均が下がったら休む。それ以外は手札の1枚目を使う。分かれ道は上の道。
+// 進め方：選手の体力の平均が下がったら休む。それ以外は手札の1枚目を使う。分かれ道は上の道。
 //   npx tsx scripts/grow-year.ts [種の数]
 
 import { Season } from '../src/grow/season';
@@ -19,10 +19,10 @@ function squad(seed: number): Squad {
   return { players: [...t.rotation.map(s => s.player), t.libero!, ...makeBench(seed, 'A', 'male', 45)], captainId: null };
 }
 
-interface Result { gain: Record<TrainKey, number[]>; focusGain: number[]; otherGain: number[]; injuries: number; rests: number; gym: number; money: number; cond: number[] }
+interface Result { gain: Record<TrainKey, number[]>; focusGain: number[]; otherGain: number[]; total: number[]; rests: number; gym: number; money: number; cond: number[] }
 
 function run(focus: boolean, buy: boolean): Result {
-  const r: Result = { gain: Object.fromEntries(KEYS.map(k => [k, []])) as unknown as Record<TrainKey, number[]>, focusGain: [], otherGain: [], injuries: 0, rests: 0, gym: 0, money: 0, cond: [0, 0, 0, 0, 0] };
+  const r: Result = { gain: Object.fromEntries(KEYS.map(k => [k, []])) as unknown as Record<TrainKey, number[]>, focusGain: [], otherGain: [], total: [], rests: 0, gym: 0, money: 0, cond: [0, 0, 0, 0, 0] };
   for (let seed = 1; seed <= SEEDS; seed++) {
     const sq = squad(seed);
     if (focus) for (const p of sq.players) p.practice.focus = FOCUS[p.practice.position];
@@ -36,16 +36,15 @@ function run(focus: boolean, buy: boolean): Result {
     }
     let guard = 0;
     while (!s.over && guard++ < 1000) {
-      const healthy = sq.players.filter(p => p.injuryDays === 0);
-      const avg = healthy.reduce((a, p) => a + p.energy, 0) / Math.max(1, healthy.length);
+      const avg = sq.players.reduce((a, p) => a + p.energy, 0) / sq.players.length;
       const res = avg < 45 ? (r.rests++, s.rest()) : s.useCard(0);
       if (res.needBranch) s.chooseBranch(0);
       while (s.pending) s.choose(0);
-      r.injuries += res.notes.filter(n => n.includes('怪我')).length;
       for (const p of sq.players) r.cond[p.condition + 2]++;
     }
     for (const p of sq.players) {
       const b = before.get(p.id)!;
+      r.total.push(KEYS.reduce((a, k) => a + p[k] - b[k], 0));
       for (const k of KEYS) {
         const g = p[k] - b[k];
         r.gain[k].push(g);
@@ -64,9 +63,10 @@ const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.lengt
 for (const [label, focus, buy] of [['おまかせ・機材なし', false, false], ['指示あり・機材なし', true, false], ['指示あり・機材を買う', true, true]] as [string, boolean, boolean][]) {
   const r = run(focus, buy);
   console.log(`\n== ${label}（${SEEDS}チーム×11人、1年間。最初の能力は平均45）`);
+  console.log(`1人の合計の伸び（平均）：+${mean(r.total).toFixed(1)}`);
   console.log(`能力ごとの伸び（平均）：${KEYS.map(k => `${NAME[k]} +${mean(r.gain[k]).toFixed(1)}`).join('、')}`);
   if (focus) console.log(`指示した能力 +${mean(r.focusGain).toFixed(1)}（最大 +${Math.max(...r.focusGain)}）、ほかの能力 +${mean(r.otherGain).toFixed(1)}`);
   const total = r.cond.reduce((a, b) => a + b, 0);
-  console.log(`怪我 ${(r.injuries / SEEDS).toFixed(1)}回/チーム、休んだ日 ${(r.rests / SEEDS).toFixed(0)}日/年、体育館レベル ${r.gym.toFixed(1)}、残ったお金 ${Math.round(r.money)}円`);
+  console.log(`休んだ日 ${(r.rests / SEEDS).toFixed(0)}日/年、体育館レベル ${r.gym.toFixed(1)}、残ったお金 ${Math.round(r.money)}円`);
   console.log(`調子の割合：絶不調 ${(100 * r.cond[0] / total).toFixed(0)}%・不調 ${(100 * r.cond[1] / total).toFixed(0)}%・普通 ${(100 * r.cond[2] / total).toFixed(0)}%・好調 ${(100 * r.cond[3] / total).toFixed(0)}%・絶好調 ${(100 * r.cond[4] / total).toFixed(0)}%`);
 }

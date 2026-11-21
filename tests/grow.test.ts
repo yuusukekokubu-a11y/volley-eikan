@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dateOf, indexOf, makeBoard } from '../src/grow/board';
 import { HAND, ENERGY, FIXED_EVENTS, DAYS_IN_YEAR, YELLOW_BONUS } from '../src/grow/constants';
+import { applyEffects, injuryChance } from '../src/grow/events';
 import { pickEvent, type EventDef } from '../src/grow/events';
 import { Season } from '../src/grow/season';
 import { Rng } from '../src/sim/rng';
@@ -119,7 +120,7 @@ describe('双六の進行', () => {
     expect(asked).toBe(true);
   });
 
-  it('育成用の体力：練習で減り、休みで回復する。減っていると怪我をしやすい', () => {
+  it('育成用の体力：練習で減り、休みで回復する。練習できなくなる怪我の状態はない', () => {
     const sq = squad();
     const s = new Season({ seed: 7, squad: sq, events: [] });
     const p = sq.players[0];
@@ -130,17 +131,7 @@ describe('双六の進行', () => {
     const low = p.energy;
     s.rest();
     expect(p.energy).toBeGreaterThan(low);
-    // 体力0のまま練習を続けると、いつか怪我をする
-    let hurt = false;
-    for (let i = 0; i < 80 && !hurt && !s.over; i++) {
-      for (const q of sq.players) { q.energy = 0; q.injuryDays = 0; }
-      const r2 = s.useCard(0);
-      if (r2.needBranch) s.chooseBranch(0);
-      if (s.pending) s.choose(0);
-      hurt = sq.players.some(q => q.injuryDays > 0) || r2.notes.some(n => n.includes('怪我'));
-    }
-    expect(hurt).toBe(true);
-    expect(ENERGY.injuryBelow).toBeGreaterThan(0);
+    expect('injuryDays' in p).toBe(false);
   });
 
   it('練習を渡す口：使ったカードの練習と日数が渡り、黄パネルで止まると経験値が増える', () => {
@@ -219,5 +210,23 @@ describe('イベントの仕組み', () => {
       if (s.day === indexOf(4, 7)) { landed = true; expect(s.flags.entered).toBe(true); }
     }
     expect(landed).toBe(true);
+  });
+});
+
+describe('怪我（イベントの効果）', () => {
+  it('確率で起き、能力・体力・調子が少し下がる。体力が低いほど起きやすい', () => {
+    expect(injuryChance(0.2, 100)).toBeCloseTo(0.2);
+    expect(injuryChance(0.2, 0)).toBeCloseTo(0.2 * ENERGY.injuryLowMul);
+    expect(injuryChance(0.2, 25)).toBeGreaterThan(0.2);
+    const sq = squad();
+    const p = sq.players[0];
+    p.power = 60; p.energy = 50; p.condition = 0;
+    const w = { year: 1, month: 5, players: sq.players, flags: {}, money: 0 };
+    applyEffects([{ kind: 'injury', chance: 1, abilities: { power: -2 }, energy: -20, condition: -1 }], w, p.id, new Rng(1));
+    expect(p.power).toBe(58);
+    expect(p.energy).toBe(30);
+    expect(p.condition).toBe(-1);
+    applyEffects([{ kind: 'injury', chance: 0, abilities: { power: -2 } }], w, p.id, new Rng(1));
+    expect(p.power).toBe(58);
   });
 });
