@@ -61,29 +61,47 @@ export const FIXED_EVENTS: FixedEvent[] = [
   { id: 'physical', name: '身体測定', month: 4, day: 15, stop: false },
   { id: 'interhighPrelim', name: 'インターハイ予選', month: 6, day: 1, stop: true },
   { id: 'interhigh', name: 'インターハイ本戦', month: 7, day: 28, stop: true },
-  { id: 'campSummer', name: '夏合宿', month: 8, day: 1, stop: false },
+  { id: 'campSummer', name: '夏合宿', month: 7, day: 20, stop: false },
   { id: 'harukouPrelim', name: '春高予選', month: 11, day: 1, stop: true },
-  { id: 'campWinter', name: '冬合宿', month: 12, day: 26, stop: false },
+  { id: 'campWinter', name: '冬合宿', month: 12, day: 15, stop: false },
   { id: 'harukou', name: '春高本戦', month: 1, day: 5, stop: true },
   { id: 'retire', name: '3年生の引退', month: 1, day: 15, stop: false },
   { id: 'graduation', name: '卒業式', month: 3, day: 1, stop: false },
-  // 練習試合：マネージャーが組む（決まった時期に起きる）。試合をするので止まる。日付は仮
-  ...([[5, 5], [6, 20], [8, 20], [9, 20], [10, 12], [12, 10], [2, 11], [3, 20]] as const).map(([month, day]) =>
-    ({ id: `practiceMatch-${month}-${day}`, name: '練習試合', month, day, stop: true, kind: 'practiceMatch' })),
 ];
 
 /**
- * 合宿：夏と冬の年2回。1ヶ月前の月初め（練習指示を変える日）に、開催するかを選ぶ。
+ * 合宿：夏（7月下旬）と冬（12月中旬）の年2回、days 日間。開催は自動（選ぶ場面はない）。日付は仮。
+ * 合宿中は手札が練習カードだけになり（ほかのカードは練習カードに入れ替わる）、緑パネルはない。
  * 合宿の間は、練習の経験が expMul 倍、体力の減りが energyMul 倍。
- * 終わった時、合宿で練習した能力に応じて特能が取れる（1人ごとに、合宿で練習した日数 × traitPerDay の確率で1つ）
+ * 練習ごと（カード1枚ごと）に、traitChance の確率で、ランダムな選手1人がその練習の種類に合った特能を覚える
  */
 export const CAMP = {
-  summer: { name: '夏合宿', offer: { month: 7, day: 1 }, start: { month: 8, day: 1 }, days: 7 },
-  winter: { name: '冬合宿', offer: { month: 12, day: 1 }, start: { month: 12, day: 26 }, days: 5 },
+  summer: { name: '夏合宿', start: { month: 7, day: 20 } },
+  winter: { name: '冬合宿', start: { month: 12, day: 15 } },
+  days: 5,
   expMul: 2,
   energyMul: 2,
-  traitPerDay: 0.03,
+  traitChance: 0.5,
 };
+
+/**
+ * 練習試合（本家と同じく3つの入り口）。試合そのもの・相手校の自動生成・評判は第3段階でつなぐ
+ * ・練習試合申し込みカード：まれに手札に来る。使うと3校から相手を選び、次の土曜日に試合
+ * ・白パネルでまれに他校から申し込み（受ける／断る）。次の土曜日に試合
+ * ・1年目の6月に1回、マネージャーが組む（firstYear の日）
+ * 大会の closeDays 日前からは申し込めない（カードは使えず、白パネルの申し込みも来ない）
+ */
+export const PRACTICE_MATCH = {
+  cardChance: 0.02,
+  whiteInviteChance: 0.08,
+  candidates: 3,
+  closeDays: 20,
+  firstYear: { month: 6, day: 20 },
+};
+
+/** 曜日：1年目の4月1日の曜日（0＝日曜 … 6＝土曜）。1年は365日なので、年度ごとに1つずれる。仮 */
+export const FIRST_WEEKDAY = 1;
+export const SATURDAY = 6;
 
 /** 練習指示：変えられるのは毎月1日（通り過ぎても止まる）と、練習指示カードを使った時。カードが手札に来る確率（1枚引くごと） */
 export const INSTRUCTION_CARD_CHANCE = 0.03;

@@ -2,7 +2,7 @@
 // ルート分岐：分かれ道のパネルの次の数日は2つの道に分かれ、どちらを通るかを選ぶ（終わるとまた1本に戻る）。
 
 import { Rng } from '../sim/rng';
-import { BRANCH, DAYS_IN_YEAR, FIXED_EVENTS, PANEL_WEIGHTS, YEAR_START } from './constants';
+import { BRANCH, CAMP, DAYS_IN_YEAR, FIRST_WEEKDAY, FIXED_EVENTS, PANEL_WEIGHTS, YEAR_START } from './constants';
 
 export type PanelKind = 'blue' | 'red' | 'white' | 'green' | 'yellow' | 'training' | 'branch' | 'fixed';
 
@@ -43,9 +43,24 @@ export function indexOf(month: number, day: number): number {
   throw new Error(`日付がありません: ${month}/${day}`);
 }
 
-function colorPanel(rng: Rng): Panel {
+/** 曜日（0＝日曜 … 6＝土曜）。year 年目の、年の中の日 index */
+export function weekdayOf(year: number, index: number): number {
+  return (FIRST_WEEKDAY + (year - 1) * DAYS_IN_YEAR + index) % 7;
+}
+
+/** 合宿の日（夏・冬の合宿の間）。kind を返す */
+export function campOf(index: number): 'summer' | 'winter' | null {
+  for (const k of ['summer', 'winter'] as const) {
+    const start = indexOf(CAMP[k].start.month, CAMP[k].start.day);
+    if (index >= start && index < start + CAMP.days) return k;
+  }
+  return null;
+}
+
+/** 色のパネル。合宿の日には緑パネルを置かない */
+function colorPanel(rng: Rng, noGreen = false): Panel {
   const w = PANEL_WEIGHTS.default;
-  const kind = rng.weighted(Object.entries(w).map(([k, v]) => ({ item: k as PanelKind, w: v! })))!;
+  const kind = rng.weighted(Object.entries(w).filter(([k]) => !(noGreen && k === 'green')).map(([k, v]) => ({ item: k as PanelKind, w: v! })))!;
   return { kind };
 }
 
@@ -65,7 +80,7 @@ export function makeBoard(seed: number): BoardDay[] {
       continue;
     }
     if (branchLeft > 0) {
-      days.push({ index: i, month, day, lanes: [colorPanel(rng), colorPanel(rng)] });
+      days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i)), colorPanel(rng, !!campOf(i))] });
       branchLeft--;
       continue;
     }
@@ -75,7 +90,7 @@ export function makeBoard(seed: number): BoardDay[] {
       branchLeft = BRANCH.minDays + Math.floor(rng.range(0, BRANCH.maxDays - BRANCH.minDays + 1));
       continue;
     }
-    days.push({ index: i, month, day, lanes: [colorPanel(rng)] });
+    days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i))] });
   }
   return days;
 }

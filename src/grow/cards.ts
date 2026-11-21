@@ -4,7 +4,7 @@
 
 import type { Rng } from '../sim/rng';
 import type { TrainKey } from '../sim/types';
-import { HAND, INSTRUCTION_CARD_CHANCE } from './constants';
+import { HAND, INSTRUCTION_CARD_CHANCE, PRACTICE_MATCH } from './constants';
 
 /** 機材：なし・下位・上位 */
 export type Equipment = 'none' | 'basic' | 'advanced';
@@ -55,8 +55,11 @@ export const CARD_WEIGHTS = { base: 1, policyMul: 2.5, general: 1.5, efficient: 
 export interface Card {
   days: number;
   practiceId: string;
-  /** 練習指示カード：使うと練習指示を変えられる（進まない、練習もしない） */
-  instruction?: boolean;
+  /**
+   * 練習以外のカード（進まない、練習もしない）。instruction＝練習指示カード（使うと練習指示を変えられる）、
+   * matchOffer＝練習試合申し込みカード（使うと3校から相手を選び、次の土曜日に練習試合）
+   */
+  special?: 'instruction' | 'matchOffer';
 }
 
 /**
@@ -79,8 +82,12 @@ export function efficientReady(id: string, policy: TeamPolicy, owned: string[]):
  * 1枚引く。機材なしの練習と総合系はいつでも出る。機材を使う練習は、その機材を持っていれば出る。
  * 高効率カードは条件（方針＋機材）を満たせば出る
  */
-export function drawCard(rng: Rng, policy: TeamPolicy, owned: string[] = []): Card {
-  if (rng.chance(INSTRUCTION_CARD_CHANCE)) return { days: 0, practiceId: '', instruction: true };
+/** 練習カードを引く。onlyPractice（合宿中）なら練習以外のカードは出ない */
+export function drawCard(rng: Rng, policy: TeamPolicy, owned: string[] = [], onlyPractice = false): Card {
+  if (!onlyPractice) {
+    if (rng.chance(INSTRUCTION_CARD_CHANCE)) return { days: 0, practiceId: '', special: 'instruction' };
+    if (rng.chance(PRACTICE_MATCH.cardChance)) return { days: 0, practiceId: '', special: 'matchOffer' };
+  }
   const fav = new Set(POLICY[policy].abilities);
   const pool = PRACTICES.filter(p => p.kind === 'efficient' ? efficientReady(p.id, policy, owned) : p.equipment === 'none' || owned.includes(p.id));
   const practice = rng.weighted(pool.map(p => ({

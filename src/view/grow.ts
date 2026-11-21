@@ -1,13 +1,13 @@
 // 育成（双六）の仮の画面。見た目は第4段階で作り込む。
 // 手札から進行カードを選んで進む。止まったマスのパネル・イベントの結果と、選手の体力・調子を見せる。
 
-import { CAMP, FIXED_EVENTS, MONEY } from '../grow/constants';
+import { FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
 import { abilityRank } from './common';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
 import { SURNAMES } from '../grow/names';
-import type { StepResult } from '../grow/season';
+import type { MatchOpponent, StepResult } from '../grow/season';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
 import { gradeOf } from '../sim/player';
@@ -51,7 +51,9 @@ function dayCol(d: BoardDay, here: boolean): string {
 function render() {
   const { month, day } = season.date;
   $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました。「次の年へ」で新しい年度に進みます）' : season.practiceOpen ? '（練習指示を変えられます）' : ''}`;
-  $('money').textContent = `お金 ${season.money.toLocaleString()}円`;
+  const m = season.scheduledMatch;
+  const WD = '日月火水木金土';
+  $('money').textContent = `お金 ${season.money.toLocaleString()}円${m ? `　練習試合 ${season.board[m.day].month}/${season.board[m.day].day}（${WD[season.weekday(m.day)]}）` : ''}`;
   $('gym').textContent = `体育館レベル ${season.gym}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
     `<button class="${season.policy === k ? 'on' : ''}" data-policy="${k}">${POLICY[k].name}</button>`).join('');
@@ -61,14 +63,15 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over || !!season.campOffer;
+  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
     const pr = PRACTICE[c.practiceId];
     const b = document.createElement('button');
-    b.innerHTML = c.instruction ? `<b>指示</b><small>練習指示カード</small><small>進まずに練習指示を変える</small>`
+    b.innerHTML = c.special === 'instruction' ? `<b>指示</b><small>練習指示カード</small><small>練習指示を変える</small>`
+      : c.special === 'matchOffer' ? `<b>試合</b><small>練習試合申し込み</small><small>${season.canUse(c) ? '3校から選ぶ' : '今は使えない'}</small>`
       : `<b>${c.days}</b><small>${pr.name}</small><small>${pr.abilities.map(a => ABILITY_NAME[a]).join('・')}</small>`;
-    b.disabled = busy;
+    b.disabled = busy || !season.canUse(c);
     b.onclick = () => after(season.useCard(i));
     $('hand').appendChild(b);
   });
@@ -97,7 +100,8 @@ function after(r: StepResult) {
   const where = r.panel ? `（${PANEL_NAME[r.panel.kind]}）` : '';
   log.push(`${month}/${day}${where} ${r.notes.join('・')}`);
   if (r.needBranch) openBranch();
-  else if (season.campOffer) openCamp();
+  else if (season.matchChoices) openMatchChoices();
+  else if (season.matchInvite) openInvite();
   else if (season.pending) openEvent();
   render();
 }
@@ -114,23 +118,35 @@ function openBranch() {
   ($('lane1') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); after(season.chooseBranch(1)); };
 }
 
-/** 合宿：開催するかを選ぶ（1ヶ月前の月初め） */
-function openCamp() {
-  const k = season.campOffer!;
-  const c = CAMP[k];
-  $('modalBox').innerHTML = `<div class="text">${c.name}（${c.start.month}/${c.start.day}から${c.days}日間）を開催しますか。<br>
-    合宿の間は体力が多く減りますが、経験が多く入り、練習した能力に応じて特能が取れることがあります。</div>
-    <div class="choices"><button id="campYes">開催する</button><button id="campNo">開催しない</button></div>`;
+const LEVEL_NAME: Record<MatchOpponent['level'], string> = { above: '格上', equal: '同格', below: '格下' };
+
+/** 練習試合申し込みカード：3校から相手を選ぶ（次の土曜日に試合） */
+function openMatchChoices() {
+  const list = season.matchChoices!;
+  $('modalBox').innerHTML = `<div class="text">練習試合の相手を選んでください（次の土曜日に試合）</div><div class="choices" id="choices"></div>`;
+  list.forEach((o, i) => {
+    const b = document.createElement('button');
+    b.textContent = `${o.name}（${LEVEL_NAME[o.level]}）`;
+    b.onclick = () => { season.chooseMatch(i); log.push(`練習試合の相手：${o.name}`); closeModal(); };
+    $('choices').appendChild(b);
+  });
   $('modal').classList.remove('hidden');
-  const done = (hold: boolean) => {
-    season.decideCamp(hold);
-    log.push(`${c.name}を${hold ? '開催する' : '開催しない'}`);
-    $('modal').classList.add('hidden');
-    if (season.pending) openEvent();
-    render();
-  };
-  ($('campYes') as HTMLButtonElement).onclick = () => done(true);
-  ($('campNo') as HTMLButtonElement).onclick = () => done(false);
+}
+
+/** 白パネル：他校から練習試合の申し込み */
+function openInvite() {
+  const o = season.matchInvite!;
+  $('modalBox').innerHTML = `<div class="text">${o.name}（${LEVEL_NAME[o.level]}）から練習試合の申し込みが来ました（次の土曜日）</div>
+    <div class="choices"><button id="yes">受ける</button><button id="no">断る</button></div>`;
+  $('modal').classList.remove('hidden');
+  ($('yes') as HTMLButtonElement).onclick = () => { season.answerInvite(true); log.push(`練習試合を受けた：${o.name}`); closeModal(); };
+  ($('no') as HTMLButtonElement).onclick = () => { season.answerInvite(false); log.push('練習試合を断った'); closeModal(); };
+}
+
+function closeModal() {
+  $('modal').classList.add('hidden');
+  if (season.pending) openEvent();
+  render();
 }
 
 /** イベント：文章と選択肢 */

@@ -1,7 +1,7 @@
 // 育成の確認用：何年分かを自動で回して、卒業時の能力の分布と体育館レベルの推移を見る。
 // 最初の部員：2・3年生を新入生の仕組みで作る（能力は入学時のまま）。
 // 進め方：体力の平均が45を切ったら休む。それ以外は手札の1枚目。分かれ道は上の道。
-// 合宿は毎回開催する。練習指示は月初めに変える。
+// 合宿は自動。練習指示は月初めに変える。練習試合の申し込みは受ける（試合はまだ行わない）。
 // 機材：毎年4月1日に、お金があるだけ下位機材から買う（買い方は仮の作戦）。
 //   npx tsx scripts/grow-career.ts [種の数] [年数]
 
@@ -50,10 +50,11 @@ function run(focus: boolean, buy: boolean) {
         // 練習指示は、変えられる日（月初め）に変える
         if (s.practiceOpen) for (const p of s.squad.players) if (focus && !p.retired && p.practice.focus === 'auto') s.setPractice(p.id, { focus: FOCUS[p.practice.position] });
         const avg = s.squad.players.reduce((a, p) => a + p.energy, 0) / Math.max(1, s.squad.players.length);
-        const r = avg < 45 ? s.rest() : s.useCard(0);
-        if (r.needBranch) s.chooseBranch(0);
+        let r = avg < 45 ? s.rest() : s.useCard(s.firstUsable());
+        while (r.needBranch) r = s.chooseBranch(0);
         while (s.pending) s.choose(0);
-        if (s.campOffer) s.decideCamp(true);
+        if (s.matchChoices) s.chooseMatch(0);
+        if (s.matchInvite) s.answerInvite(true);
         if (s.date.month === 3 && s.date.day === 31) break;
       }
       gym[y].push(s.gym);

@@ -37,10 +37,11 @@ function run(focus: boolean, buy: boolean): Result {
     let guard = 0;
     while (!s.over && guard++ < 1000) {
       const avg = sq.players.reduce((a, p) => a + p.energy, 0) / sq.players.length;
-      const res = avg < 45 ? (r.rests++, s.rest()) : s.useCard(0);
-      if (res.needBranch) s.chooseBranch(0);
+      let res = avg < 45 ? (r.rests++, s.rest()) : s.useCard(s.firstUsable());
+      while (res.needBranch) res = s.chooseBranch(0);
       while (s.pending) s.choose(0);
-      if (s.campOffer) s.decideCamp(true);
+      if (s.matchChoices) s.chooseMatch(0);
+        if (s.matchInvite) s.answerInvite(true);
       for (const p of sq.players) r.cond[p.condition + 2]++;
     }
     for (const p of sq.players) {

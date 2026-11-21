@@ -61,18 +61,20 @@ describe('双六の進行', () => {
   it('手札は5枚、進む日数は1〜5。使うと書いてある日数だけ進み、1枚引く', () => {
     const s = new Season({ seed: 1, squad: squad(), events: [] });
     expect(s.hand).toHaveLength(HAND.size);
-    for (const c of s.hand.filter(c => !c.instruction)) expect(c.days).toBeGreaterThanOrEqual(1);
+    for (const c of s.hand.filter(c => !c.special)) expect(c.days).toBeGreaterThanOrEqual(1);
     for (const c of s.hand) expect(c.days).toBeLessThanOrEqual(5);
     let guard = 0;
     while (guard++ < 30) {
       const before = s.day;
-      const days = s.hand[0].days;
-      const r = s.useCard(0);
+      const i = s.firstUsable();
+      const days = s.hand[i].days;
+      const r = s.useCard(i);
       if (r.needBranch) { s.chooseBranch(0); continue; }
       expect(s.hand).toHaveLength(HAND.size);
       // 大会・練習試合・月初めで止まった時だけ、書いてある日数より短い
-      if (s.day - before !== days) expect(s.panelAt(s.day).kind === 'fixed' || s.date.day === 1 || days === 0).toBe(true);
-      if (s.campOffer) s.decideCamp(false);
+      if (s.day - before !== days) expect(s.panelAt(s.day).kind === 'fixed' || s.date.day === 1 || !!r.match).toBe(true);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(true);
       while (s.pending) s.choose(0);
     }
   });
@@ -81,7 +83,7 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 2, squad: squad(), events: [] });
     const target = indexOf(6, 1); // インターハイ予選
     while (s.day < target) {
-      const r = s.useCard(0);
+      const r = s.useCard(s.firstUsable());
       if (r.needBranch) s.chooseBranch(0);
       expect(s.day).toBeLessThanOrEqual(target);
     }
@@ -94,7 +96,7 @@ describe('双六の進行', () => {
       const s = new Season({ seed, squad: squad(), events: TEST_EVENTS });
       const target = indexOf(4, 7); // 入学式
       while (s.day < target) {
-        const r = s.useCard(0);
+        const r = s.useCard(s.firstUsable());
         if (r.needBranch) s.chooseBranch(0);
         while (s.pending) s.choose(0);
       }
@@ -110,10 +112,10 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 5, squad: squad(), events: [] });
     let asked = false;
     for (let i = 0; i < 200 && !asked && !s.over; i++) {
-      const r = s.useCard(0);
+      const r = s.useCard(s.firstUsable());
       if (r.needBranch) {
         asked = true;
-        expect(() => s.useCard(0)).toThrow();
+        expect(() => s.useCard(s.firstUsable())).toThrow();
         s.chooseBranch(1);
         if (s.board[s.day].lanes.length === 2) expect(s.lane).toBe(1);
       }
@@ -126,7 +128,7 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 7, squad: sq, events: [] });
     const p = sq.players[0];
     const before = p.energy;
-    const r = s.useCard(0);
+    const r = s.useCard(s.firstUsable());
     if (r.needBranch) s.chooseBranch(0);
     expect(p.energy).toBeLessThan(before);
     const low = p.energy;
@@ -140,10 +142,11 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 9, squad: squad(), events: [], onPractice: (pr, days, mul) => calls.push({ id: pr.id, days, mul }) });
     let yellow = false;
     for (let i = 0; i < 150 && !yellow && !s.over; i++) {
-      const card = s.hand[0];
+      const card = s.hand[s.firstUsable()];
       calls.length = 0;
-      const r = s.useCard(0);
+      const r = s.useCard(s.firstUsable());
       if (r.needBranch) { s.chooseBranch(0); continue; }
+      if (card.special) { if (s.matchChoices) s.chooseMatch(0); continue; }
       expect(calls[0].id).toBe(card.practiceId);
       if (r.panel?.kind === 'yellow') {
         yellow = true;
@@ -172,7 +175,7 @@ describe('イベントの仕組み', () => {
     // 青パネルに止まるまで進める
     let ev = null;
     for (let i = 0; i < 300 && !ev && !s.over; i++) {
-      const r = s.useCard(0);
+      const r = s.useCard(s.firstUsable());
       if (r.needBranch) { s.chooseBranch(0); continue; }
       if (s.pending?.def.id === 't-blue') ev = s.pending;
       else if (s.pending) s.choose(0);
@@ -180,14 +183,14 @@ describe('イベントの仕組み', () => {
     expect(ev).toBeTruthy();
     const p = sq.players.find(x => x.id === ev!.subjectId)!;
     const power = p.power;
-    expect(() => s.useCard(0)).toThrow(); // 選択肢を選ぶまで進めない
+    expect(() => s.useCard(s.firstUsable())).toThrow(); // 選択肢を選ぶまで進めない
     s.choose(0);
     expect(p.power).toBe(Math.min(100, power + 2));
     expect(s.flags.seen).toBe(true);
     // 続きのイベント
     const s2 = new Season({ seed: 11, squad: squad(), events: TEST_EVENTS });
     for (let i = 0; i < 300 && s2.pending?.def.id !== 't-blue' && !s2.over; i++) {
-      const r = s2.useCard(0);
+      const r = s2.useCard(s2.firstUsable());
       if (r.needBranch) s2.chooseBranch(0);
       else if (s2.pending && s2.pending.def.id !== 't-blue') s2.choose(0);
     }
@@ -204,7 +207,7 @@ describe('イベントの仕組み', () => {
     for (let seed = 1; seed <= 40 && !landed; seed++) {
       const s = new Season({ seed, squad: squad(), events: TEST_EVENTS });
       while (s.day < indexOf(4, 7)) {
-        const r = s.useCard(0);
+        const r = s.useCard(s.firstUsable());
         if (r.needBranch) s.chooseBranch(0);
         while (s.pending) s.choose(0);
       }

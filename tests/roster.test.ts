@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Career } from '../src/grow/career';
-import { GYM, MONEY, ROSTER } from '../src/grow/constants';
+import { CAMP, GYM, MONEY, PRACTICE_MATCH, ROSTER, SATURDAY } from '../src/grow/constants';
+import { campOf, indexOf, makeBoard } from '../src/grow/board';
 import { gymLevel, gymMul, EQUIPMENT } from '../src/grow/practice';
 import { enroll, graduate, measure } from '../src/grow/roster';
 import { gradeOf } from '../src/sim/player';
@@ -21,10 +22,11 @@ function playYear(c: Career) {
   const s = c.season;
   let guard = 0;
   while (!s.over && guard++ < 1000) {
-    const r = s.useCard(0);
+    const r = s.useCard(s.firstUsable());
     if (r.needBranch) s.chooseBranch(0);
     while (s.pending) s.choose(0);
-    if (s.campOffer) s.decideCamp(true);
+    if (s.matchChoices) s.chooseMatch(0);
+        if (s.matchInvite) s.answerInvite(true);
   }
 }
 
@@ -123,15 +125,16 @@ describe('体育館レベルの上限', () => {
   });
 });
 
-/** 条件を満たすまで進める（合宿は answer で返事をする） */
-function until(c: Career, done: () => boolean, answer = true) {
+/** 条件を満たすまで進める（練習試合は受ける） */
+function until(c: Career, done: () => boolean) {
   const s = c.season;
   let guard = 0;
   while (!done() && !s.over && guard++ < 1000) {
-    const r = s.useCard(0);
+    const r = s.useCard(s.firstUsable());
     if (r.needBranch) s.chooseBranch(0);
     while (s.pending) s.choose(0);
-    if (s.campOffer) s.decideCamp(answer);
+    if (s.matchChoices) s.chooseMatch(0);
+    if (s.matchInvite) s.answerInvite(true);
   }
 }
 
@@ -145,10 +148,11 @@ describe('練習指示・引退・合宿・練習試合', () => {
     let closed = false;
     for (let i = 0; i < 40 && !closed; i++) {
       const before = s.date.month;
-      const r = s.useCard(0);
+      const r = s.useCard(s.firstUsable());
       if (r.needBranch) s.chooseBranch(0);
       while (s.pending) s.choose(0);
-      if (s.campOffer) s.decideCamp(false);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(true);
       if (!s.practiceOpen) { closed = true; expect(() => s.setPractice(p.id, { focus: 'jump' })).toThrow(); }
       // 月が変わったら、必ず1日で止まっている
       if (s.date.month !== before && !r.needBranch) expect(s.date.day).toBe(1);
@@ -160,10 +164,10 @@ describe('練習指示・引退・合宿・練習試合', () => {
     s.setPractice(p.id, { focus: 'jump', position: 'OP' });
     expect(p.practice).toEqual({ focus: 'jump', position: 'OP' });
     // 練習指示カード：使うと進まずに開く
-    s.useCard(0);
-    s.hand[0] = { days: 0, practiceId: '', instruction: true };
+    s.useCard(s.firstUsable());
+    s.hand[0] = { days: 0, practiceId: '', special: 'instruction' };
     const day = s.day;
-    const r = s.useCard(0);
+    const r = s.useCard(s.firstUsable());
     expect(r.practiceOpen).toBe(true);
     expect(s.day).toBe(day);
     s.setPractice(p.id, { focus: 'auto' });
@@ -186,24 +190,84 @@ describe('練習指示・引退・合宿・練習試合', () => {
     expect(() => s.setPractice(third[0].id, { focus: 'power' })).toThrow();
   });
 
-  it('合宿：1ヶ月前の月初めに開催するかを選ぶ。開催すると体力が多く減り、経験が多く入る', () => {
-    const run = (hold: boolean) => {
-      const c = new Career({ seed: 8, squad: startSquad(8), events: [] });
+  it('合宿：夏と冬に自動で開催。合宿中は練習カードだけで緑パネルはなく、経験が多く入り、特能を覚えることがある', () => {
+    for (const k of ['summer', 'winter'] as const) {
+      const start = indexOf(CAMP[k].start.month, CAMP[k].start.day);
+      for (let seed = 1; seed <= 5; seed++) {
+        const b = makeBoard(seed);
+        for (let d = start; d < start + CAMP.days; d++) expect(b[d].lanes.some(l => l.kind === 'green')).toBe(false);
+      }
+    }
+    let traits = 0;
+    for (let seed = 1; seed <= 6; seed++) {
+      const c = new Career({ seed, squad: startSquad(seed), events: [] });
       const s = c.season;
-      until(c, () => s.campOffer !== null || s.date.month === 7, hold);
-      expect(s.date).toEqual({ month: 7, day: 1 });
-      until(c, () => s.date.month === 8 && s.date.day > 8, hold);
-      expect(s.camps.summer).toBe(hold);
-      return c.squad.players.reduce((a, p) => a + p.jump + p.power + p.speed + p.technique + p.block + p.stamina, 0);
-    };
-    expect(run(true)).toBeGreaterThan(run(false));
+      const before = c.squad.players.reduce((a, p) => a + p.traits.length, 0);
+      until(c, () => !!campOf(s.day));
+      if (!campOf(s.day)) continue;
+      expect(s.hand.every(card => !card.special)).toBe(true);
+      until(c, () => s.date.month === 8);
+      traits += c.squad.players.reduce((a, p) => a + p.traits.length, 0) - before;
+    }
+    expect(traits).toBeGreaterThan(0);
   });
 
-  it('練習試合の日は止まる', () => {
+  it('練習試合：申し込みカードで3校から選ぶと次の土曜日に止まる。大会の20日前からは使えない', () => {
     const c = new Career({ seed: 9, squad: startSquad(9), events: [] });
     const s = c.season;
-    until(c, () => s.date.month === 5 && s.date.day >= 5);
-    expect(s.date).toEqual({ month: 5, day: 5 });
-    expect(s.panelAt(s.day).fixedId).toBe('practiceMatch-5-5');
+    // 1年目の6月はマネージャーが組んでいる
+    expect(s.scheduledMatch?.via).toBe('manager');
+    expect(s.weekday(s.scheduledMatch!.day)).toBe(SATURDAY);
+    s.scheduledMatch = null;
+    s.hand[0] = { days: 0, practiceId: '', special: 'matchOffer' };
+    const r = s.useCard(0);
+    expect(r.matchChoices).toHaveLength(PRACTICE_MATCH.candidates);
+    expect(() => s.useCard(s.firstUsable())).toThrow();
+    s.chooseMatch(1);
+    const day = s.scheduledMatch!.day;
+    expect(s.weekday(day)).toBe(SATURDAY);
+    expect(day).toBeGreaterThan(s.day);
+    // もう予定があるので、もう1枚は使えない
+    expect(s.canUse({ days: 0, practiceId: '', special: 'matchOffer' })).toBe(false);
+    let stopped: unknown = null;
+    for (let i = 0; i < 20 && !stopped; i++) {
+      const res = s.useCard(s.firstUsable());
+      if (res.needBranch) s.chooseBranch(0);
+      while (s.pending) s.choose(0);
+      if (res.match) stopped = res.match;
+    }
+    expect(s.day).toBe(day);
+    expect(stopped).toBeTruthy();
+    expect(s.scheduledMatch).toBeNull();
+    // インターハイ予選（6/1）の20日前からは使えない
+    until(c, () => s.day >= indexOf(5, 15));
+    s.scheduledMatch = null;
+    if (s.day < indexOf(6, 1)) expect(s.canUse({ days: 0, practiceId: '', special: 'matchOffer' })).toBe(false);
+  });
+
+  it('白パネルでまれに他校から申し込みが来る。受けると次の土曜日、断ると予定は入らない', () => {
+    let seen = 0;
+    for (let seed = 1; seed <= 30 && seen < 2; seed++) {
+      const c = new Career({ seed, squad: startSquad(seed), events: [] });
+      const s = c.season;
+      s.scheduledMatch = null;
+      for (let i = 0; i < 300 && !s.over && seen < 2; i++) {
+        let r = s.useCard(s.firstUsable());
+        while (r.needBranch) r = s.chooseBranch(0);
+        while (s.pending) s.choose(0);
+        if (s.matchChoices) s.chooseMatch(0);
+        if (r.matchInvite) {
+          expect(s.panelAt(s.day).kind).toBe('white');
+          expect(() => s.useCard(s.firstUsable())).toThrow();
+          const accept = seen === 0;
+          s.answerInvite(accept);
+          if (accept) expect(s.weekday(s.scheduledMatch!.day)).toBe(SATURDAY);
+          else expect(s.scheduledMatch).toBeNull();
+          seen++;
+          s.scheduledMatch = null;
+        }
+      }
+    }
+    expect(seen).toBe(2);
   });
 });
