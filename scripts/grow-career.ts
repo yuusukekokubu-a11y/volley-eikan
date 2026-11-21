@@ -1,4 +1,4 @@
-import { finishStep } from '../src/grow/season';
+import { finishStep, useQuickBouts } from '../src/grow/season';
 // 育成の確認用：何年分かを自動で回して、卒業時の能力の分布と体育館レベルの推移を見る。
 // 最初の部員：2・3年生を新入生の仕組みで作る（能力は入学時のまま）。
 // 進め方：体力の平均が45を切ったら休む。それ以外は手札の1枚目。分かれ道は上の道。
@@ -13,6 +13,8 @@ import { enroll, type Graduate } from '../src/grow/roster';
 import { Rng } from '../src/sim/rng';
 import type { Role, Squad, TrainKey } from '../src/sim/types';
 
+// 他校同士の試合は強さの差の確率で決める（速く回すため。自チームの試合は試合の計算）
+useQuickBouts();
 const SEEDS = Number(process.argv[2] || 20);
 const YEARS = Number(process.argv[3] || 6);
 const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
@@ -53,6 +55,7 @@ function run(focus: boolean, buy: boolean) {
         const avg = s.squad.players.reduce((a, p) => a + p.energy, 0) / Math.max(1, s.squad.players.length);
         finishStep(s, avg < 45 ? s.rest() : s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
+        while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); }
         if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
         if (s.date.month === 3 && s.date.day === 31) break;

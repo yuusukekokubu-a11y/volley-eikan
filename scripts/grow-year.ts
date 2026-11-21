@@ -2,12 +2,14 @@
 // 進め方：選手の体力の平均が下がったら休む。それ以外は手札の1枚目を使う。分かれ道は上の道。
 //   npx tsx scripts/grow-year.ts [種の数]
 
-import { Season, finishStep } from '../src/grow/season';
+import { Season, finishStep, useQuickBouts } from '../src/grow/season';
 import { EQUIPMENT } from '../src/grow/practice';
 import { MONEY } from '../src/grow/constants';
 import { makeBench, makeTeam } from '../src/sim/sample';
 import type { Player, Role, Squad, TrainKey } from '../src/sim/types';
 
+// 他校同士の試合は強さの差の確率で決める（速く回すため。自チームの試合は試合の計算）
+useQuickBouts();
 const SEEDS = Number(process.argv[2] || 20);
 const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
 const NAME: Record<TrainKey, string> = { jump: '跳躍', power: 'パワー', speed: 'スピード', technique: 'テクニック', block: 'ブロック', stamina: 'スタミナ' };
@@ -39,6 +41,7 @@ function run(focus: boolean, buy: boolean): Result {
       const avg = sq.players.reduce((a, p) => a + p.energy, 0) / sq.players.length;
       finishStep(s, avg < 45 ? (r.rests++, s.rest()) : s.useCard(s.firstUsable()));
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); }
       if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
       for (const p of sq.players) r.cond[p.condition + 2]++;

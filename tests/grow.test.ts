@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { useQuickBouts } from '../src/grow/season';
+useQuickBouts();
 import { dateOf, indexOf, makeBoard } from '../src/grow/board';
 import { HAND, ENERGY, FIXED_EVENTS, DAYS_IN_YEAR, YELLOW_BONUS } from '../src/grow/constants';
 import { applyEffects, injuryChance } from '../src/grow/events';
@@ -71,10 +73,11 @@ describe('双六の進行', () => {
       const r = finishStep(s, s.useCard(i));
       expect(s.hand).toHaveLength(HAND.size);
       // 大会・練習試合・月初めで止まった時だけ、書いてある日数より短い
-      if (s.day - before !== days) expect(s.panelAt(s.day).kind === 'fixed' || s.date.day === 1 || !!r.match).toBe(true);
+      if (s.day - before !== days) expect(s.panelAt(s.day).kind === 'fixed' || s.date.day === 1 || !!r.match || !!s.pendingMatch).toBe(true);
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(true);
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) s.playMatch();
     }
   });
 
@@ -96,6 +99,7 @@ describe('双六の進行', () => {
       while (s.day < target) {
         finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
+        while (s.pendingMatch) s.playMatch();
       }
       if (s.day > target) {
         passed = true;
@@ -109,6 +113,10 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 5, squad: squad(), events: [] });
     let asked = false;
     for (let i = 0; i < 200 && !asked && !s.over; i++) {
+      while (s.pendingMatch) s.playMatch();
+      while (s.pending) s.choose(0);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(false);
       let r = s.useCard(s.firstUsable());
       while (r.paused) r = s.resume();
       if (r.needBranch) {
@@ -203,6 +211,7 @@ describe('イベントの仕組み', () => {
       while (s.day < indexOf(4, 7)) {
         finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
+        while (s.pendingMatch) s.playMatch();
       }
       if (s.day === indexOf(4, 7)) { landed = true; expect(s.flags.entered).toBe(true); }
     }

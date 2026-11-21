@@ -1,5 +1,7 @@
 import { finishStep } from '../src/grow/season';
 import { describe, expect, it } from 'vitest';
+import { useQuickBouts } from '../src/grow/season';
+useQuickBouts();
 import { Career } from '../src/grow/career';
 import { CAMP, GYM, MONEY, PRACTICE_MATCH, ROSTER, SATURDAY } from '../src/grow/constants';
 import { campOf, indexOf, makeBoard } from '../src/grow/board';
@@ -25,6 +27,7 @@ function playYear(c: Career) {
   while (!s.over && guard++ < 1000) {
     finishStep(s, s.useCard(s.firstUsable()));
     while (s.pending) s.choose(0);
+    while (s.pendingMatch) s.playMatch();
     if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
   }
@@ -111,7 +114,8 @@ describe('育成全体（年度の切り替え）', () => {
     c.nextYear();
     expect(c.year).toBe(2);
     expect(c.graduates.length).toBeGreaterThan(0);
-    expect(c.season.money).toBe(money + MONEY.budget);
+    // 試合の勝利の報奨も入るので、部費の分以上
+    expect(c.season.money).toBeGreaterThanOrEqual(money + MONEY.budget);
     expect(c.season.equipment).toContain('dumbbell');
     expect(c.squad.players.some(p => !firstIds.has(p.id))).toBe(true);
     expect(c.squad.players.every(p => p.energy === 100)).toBe(true);
@@ -132,6 +136,7 @@ function until(c: Career, done: () => boolean) {
   while (!done() && !s.over && guard++ < 1000) {
     finishStep(s, s.useCard(s.firstUsable()));
     while (s.pending) s.choose(0);
+    while (s.pendingMatch) s.playMatch();
     if (s.matchChoices) s.chooseMatch(0);
     if (s.matchInvite) s.answerInvite(true);
   }
@@ -162,6 +167,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
         if (!r2.match && s.panelAt(s.day).kind !== 'fixed' && !r2.practiceOpen) expect(s.day - before).toBe(days);
       }
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) s.playMatch();
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(true);
       if (!s.practiceOpen) { closed = true; expect(() => s.setPractice(p.id, { focus: 'jump' })).toThrow(); }
@@ -235,6 +241,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
     for (let i = 0; i < 20 && !stopped; i++) {
       const res = finishStep(s, s.useCard(s.firstUsable()));
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) s.playMatch();
       if (res.match) stopped = res.match;
     }
     expect(s.day).toBe(day);
@@ -255,6 +262,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
       for (let i = 0; i < 300 && !s.over && seen < 2; i++) {
         const r = finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
+        while (s.pendingMatch) s.playMatch();
         if (s.matchChoices) s.chooseMatch(0);
         if (r.matchInvite) {
           expect(s.panelAt(s.day).kind).toBe('white');
@@ -280,6 +288,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
       const r = finishStep(s, s.useCard(s.firstUsable()));
       for (const m of r.messages ?? []) said.push(m.text);
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) s.playMatch();
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(false);
     }
@@ -301,6 +310,7 @@ describe('練習指示・引退・合宿・練習試合', () => {
       const r = finishStep(s, s.useCard(s.firstUsable()));
       for (const m of r.messages ?? []) said.push(m.text);
       while (s.pending) s.choose(0);
+      while (s.pendingMatch) s.playMatch();
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(false);
     }

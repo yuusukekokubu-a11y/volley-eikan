@@ -72,7 +72,10 @@ function pickName(squad: Squad, rng: Rng): string {
 /** 新入生を1人作る */
 export function makeNewcomer(rng: Rng, squad: Squad, year: number, gender: Gender, serial: number): Player {
   const role = rng.weighted(ROLES.map(r => ({ item: r, w: ROSTER.roleWeights[r] })))!;
-  const p = makePlayer(rng, `y${year}-${serial}`, freeNumber(squad), role, gender, ROSTER.newcomerAvg);
+  // 選手を見分ける番号は部員の中でかぶらないようにする
+  let id = `y${year}-${serial}`;
+  for (let k = 2; squad.players.some(x => x.id === id); k++) id = `y${year}-${serial}-${k}`;
+  const p = makePlayer(rng, id, freeNumber(squad), role, gender, ROSTER.newcomerAvg);
   // 試作用の作り方から、新入生の決まりに合わせて直す
   const spread = ROSTER.newcomerSpread;
   for (const k of KEYS) p[k] = Math.round(Math.min(99, Math.max(1, ROSTER.newcomerAvg + (p[k] - ROSTER.newcomerAvg) * spread / 10)));

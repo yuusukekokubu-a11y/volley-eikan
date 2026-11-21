@@ -8,6 +8,10 @@ import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
 import { SURNAMES } from '../grow/names';
 import type { MatchOpponent, StepResult } from '../grow/season';
+import type { MatchOutcome } from '../grow/matchplay';
+import { isLibero } from '../grow/school';
+import { SQUAD_LIMIT } from '../grow/constants';
+import type { Tournament } from '../grow/tournament';
 import { fill, TEXTS, type Message } from '../grow/texts';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
@@ -64,7 +68,7 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused;
+  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused || !!season.pendingMatch;
   ($('resume') as HTMLButtonElement).disabled = !season.paused;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
@@ -107,7 +111,7 @@ function after(r: StepResult) {
     if (r.needBranch) openBranch();
     else if (season.matchChoices) openMatchChoices();
     else if (season.matchInvite) openInvite();
-    else if (season.pending) openEvent();
+    else nextModal();
     render();
   });
   render();
@@ -162,8 +166,16 @@ function openInvite() {
 
 function closeModal() {
   $('modal').classList.add('hidden');
-  if (season.pending) openEvent();
+  nextModal();
   render();
+}
+
+/** 待っているもの（イベント・試合）があれば、その画面を出す */
+function nextModal() {
+  if (season.pending) openEvent();
+  else if (season.matchChoices) openMatchChoices();
+  else if (season.matchInvite) openInvite();
+  else if (season.pendingMatch) openMatch();
 }
 
 /** イベント：文章と選択肢 */
@@ -177,7 +189,8 @@ function openEvent() {
     b.onclick = () => {
       $('modal').classList.add('hidden');
       log.push(`イベント：${c.label}`);
-      if (season.choose(i)) openEvent();
+      season.choose(i);
+      nextModal();
       render();
     };
     $('choices').appendChild(b);
@@ -228,6 +241,90 @@ function openShop() {
   $('modal').classList.remove('hidden');
 }
 
+// ---------------- 試合（大会・練習試合） ----------------
+
+/** 試合前：登録（大会だけ）と、結果だけ／試合を見る */
+function openMatch() {
+  const pm = season.pendingMatch!;
+  let reg = season.defaultRegistration();
+  const draw = () => {
+    const ps = season.squad.players.filter(p => !p.retired);
+    const libs = ps.filter(p => reg.includes(p.id) && isLibero(p)).length;
+    const regHtml = pm.limit
+      ? `<div class="text" style="font-size:13px">登録 ${reg.length}/${SQUAD_LIMIT.size}人（リベロ ${libs}/${SQUAD_LIMIT.libero}人）。押すと入れ替え</div>
+         <div class="reg">${ps.map(p => `<button class="${reg.includes(p.id) ? 'on' : 'off'}" data-reg="${p.id}">${p.number} ${p.name} ${ROLE_NAME[bestRole(p)].slice(0, 3)}</button>`).join('')}</div>`
+      : '<div class="text" style="font-size:13px">練習試合は全員が出られます</div>';
+    let err = '';
+    try { season.matchSetup(reg); } catch (e) { err = (e as Error).message; }
+    $('modalBox').innerHTML = `<div class="text">${pm.title}：${pm.opponent.name}（強さ ${abilityRank(pm.opponent.strength)}${Math.round(pm.opponent.strength)}・自校 ${abilityRank(season.ownStrength())}${Math.round(season.ownStrength())}）／${pm.bestOf}セットマッチ</div>
+      ${regHtml}${err ? `<div class="text" style="color:#ff9d7a;font-size:13px">${err}</div>` : ''}
+      <div class="choices"><button id="mAuto" ${err ? 'disabled' : ''}>結果だけ</button><button id="mWatch" ${err ? 'disabled' : ''}>試合を見る</button></div>`;
+    for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-reg]'))) {
+      b.onclick = () => {
+        const id = b.getAttribute('data-reg')!;
+        reg = reg.includes(id) ? reg.filter(x => x !== id) : [...reg, id];
+        draw();
+      };
+    }
+    ($('mAuto') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); afterMatch(season.playMatch(reg)); };
+    ($('mWatch') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); watchMatch(reg); };
+  };
+  draw();
+  $('modal').classList.remove('hidden');
+}
+
+/** 試合を見る：試合の画面（index.html）を重ねて開き、終わったら結果を受け取る */
+function watchMatch(reg: string[]) {
+  const setup = season.matchSetup(reg);
+  const box = $('matchFrame');
+  box.innerHTML = '<iframe src="index.html?embed=1"></iframe>';
+  box.classList.remove('hidden');
+  const frame = box.querySelector('iframe')!;
+  const onMsg = (ev: MessageEvent) => {
+    if (ev.source !== frame.contentWindow) return;
+    if (ev.data?.type === 'matchReady') frame.contentWindow!.postMessage({ type: 'matchSetup', options: setup.options }, '*');
+    if (ev.data?.type === 'matchResult') {
+      window.removeEventListener('message', onMsg);
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      afterMatch(season.finishMatch(ev.data.outcome as MatchOutcome, setup.registered));
+    }
+  };
+  window.addEventListener('message', onMsg);
+}
+
+/** 試合の後：結果を見せ、続けて試合があれば（本戦）次の試合前へ */
+function afterMatch(r: StepResult) {
+  log.push(r.notes.join('・'));
+  showMessages([{ text: r.notes.join('<br>') }], () => { nextModal(); render(); });
+  render();
+}
+
+/** 大会：この年度のトーナメント表 */
+function openCups(id?: string) {
+  const list = Object.values(season.tournaments).filter(Boolean) as Tournament[];
+  if (!list.length) {
+    showMessages([{ text: 'この年度の大会はまだありません' }], render);
+    return;
+  }
+  const t = list.find(x => x.def.id === id) ?? list[list.length - 1];
+  const name = (i: number) => {
+    const e = t.entries[i];
+    return `<span class="${e.own ? 'own' : ''}">${e.name}（${abilityRank(e.strength)}）</span>`;
+  };
+  const cols = t.rounds.map((round, ri) => `<div class="col"><b>${['1回戦', '2回戦', '準々決勝', '準決勝', '決勝'][ri]}</b>${round.map(b => {
+    const done = b.winner !== undefined;
+    const loser = done ? (b.winner === b.a ? b.b : b.a) : -1;
+    return `<div class="bout"><div class="${loser === b.a ? 'lost' : ''}">${name(b.a)}</div><div class="${loser === b.b ? 'lost' : ''}">${name(b.b)}</div>${done ? `<small>${b.sets}</small>` : ''}</div>`;
+  }).join('')}</div>`).join('');
+  $('modalBox').innerHTML = `<div class="choices">${list.map(x => `<button class="${x === t ? 'on' : 'off'}" data-cup="${x.def.id}">${x.def.name}</button>`).join('')}</div>
+    <div class="text" style="font-size:13px">${t.def.name}：自校 ${t.ownResult().text}${t.champion ? `／優勝 ${t.champion.name}` : ''}</div>
+    <div class="bracket">${cols}</div><div class="choices"><button id="close">閉じる</button></div>`;
+  for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-cup]'))) b.onclick = () => openCups(b.getAttribute('data-cup')!);
+  ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+  $('modal').classList.remove('hidden');
+}
+
 /** 卒業生の名簿 */
 function openGraduates() {
   const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
@@ -242,6 +339,7 @@ function openGraduates() {
 
 ($('shop') as HTMLButtonElement).onclick = openShop;
 ($('grads') as HTMLButtonElement).onclick = openGraduates;
+($('cups') as HTMLButtonElement).onclick = () => openCups();
 ($('nextYear') as HTMLButtonElement).onclick = () => {
   season = career.nextYear();
   log.push(`${season.year}年目が始まりました（部費 ${MONEY.budget.toLocaleString()}円）`);

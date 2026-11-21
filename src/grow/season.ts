@@ -10,7 +10,11 @@ import { gradeOf } from '../sim/player';
 import { TRAITS } from '../sim/traits';
 import { campOf, dateOf, indexOf, makeBoard, weekdayOf, type BoardDay, type Panel } from './board';
 import { drawCard, PRACTICE, type Card, type PracticeDef, type TeamPolicy } from './cards';
-import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, YELLOW_BONUS } from './constants';
+import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, SCHOOLS, TOURNAMENTS, YELLOW_BONUS, type TournamentDef } from './constants';
+import { autoLineup, autoRegister, checkRegistration, makeNationals, makePrefecture, makeSchoolPlayers, randomTactics, teamStrength, type School } from './school';
+import { Tournament, type BoutSim, type Entry } from './tournament';
+import { applyMatchExp, outcomeOf, runMatch, setCount, type MatchOutcome } from './matchplay';
+import type { MatchOptions } from '../sim/game';
 import { SURNAMES } from './names';
 import { fill, TEXTS, type Message } from './texts';
 import { applyPractice, dailyCondition, EQUIPMENT, gymLevel } from './practice';
@@ -35,6 +39,43 @@ export interface SeasonOptions {
   /** イベントの一覧（省くとゲームのイベント。テストでは仮のイベントを渡す） */
   events?: EventDef[];
   onPractice?: PracticeHook;
+  /** 県内の学校（育成全体で持つ。省くと seed から作る） */
+  schools?: School[];
+}
+
+/** 試合を待っている（大会の1試合・練習試合）。playMatch（結果だけ）か、試合画面で行って finishMatch で続ける */
+export interface PendingMatch {
+  kind: 'tournament' | 'practice';
+  tournamentId?: TournamentDef['id'];
+  /** 「インターハイ予選 2回戦」「練習試合」など */
+  title: string;
+  opponent: { id: string; name: string; strength: number };
+  bestOf: 3 | 5;
+  /** 登録の人数の決まりがある（大会） */
+  limit: boolean;
+}
+
+/** 試合の画面に渡すもの（自チーム＝A） */
+export interface MatchSetup {
+  options: MatchOptions;
+  /** 先発（第1セットの始まり） */
+  starters: string[];
+  registered: string[];
+}
+
+const STOP_TOURNAMENTS = new Set<string>(Object.keys(TOURNAMENTS));
+
+/** テスト用：他校同士の試合を、試合の計算ではなく強さの差の確率で決める（速く回すため） */
+let quickBouts = false;
+export function useQuickBouts(on = true) {
+  quickBouts = on;
+}
+
+/** 文字列から種を作る */
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0) % 1000000007;
 }
 
 /** 1回の行動（カード・休み）の結果 */
@@ -67,6 +108,8 @@ export interface StepResult {
 export interface MatchOpponent {
   name: string;
   level: 'above' | 'equal' | 'below';
+  /** 強さ（自チームの強さと level から決める） */
+  strength: number;
 }
 
 /** 予定している練習試合。via：申し込みカード／他校からの申し込み／マネージャー（1年目の6月） */
@@ -113,6 +156,17 @@ export class Season {
   private outbox: Message[] = [];
   /** 合宿の最後の日を過ぎた（その日の練習の後に、終わりの台詞を出す） */
   private campEnding = false;
+  /** 県内の学校 */
+  readonly schools: School[];
+  private readonly seed: number;
+  /** この年度の大会 */
+  tournaments: Partial<Record<TournamentDef['id'], Tournament>> = {};
+  /** 予選を勝ち抜いて出られる本戦 */
+  qualified: Partial<Record<TournamentDef['id'], boolean>> = {};
+  /** 予選の次の回戦の日（その日に止まる） */
+  tournamentDay: number | null = null;
+  /** 試合を待っている */
+  pendingMatch: PendingMatch | null = null;
   /** 予定している練習試合（1つまで） */
   scheduledMatch: ScheduledMatch | null = null;
   /** 申し込みカードを使って、相手を選ぶのを待っている3校 */
@@ -133,6 +187,8 @@ export class Season {
     this.events = o.events ?? EVENTS;
     this.rng = new Rng(o.seed * 131 + 17);
     this.onPractice = o.onPractice;
+    this.seed = o.seed;
+    this.schools = o.schools ?? makePrefecture(o.seed);
     for (let i = 0; i < HAND.size; i++) this.hand.push(this.draw());
   }
 
@@ -179,11 +235,21 @@ export class Season {
 
   /** 練習試合の相手（仮の名前と強さ） */
   private makeOpponent(): MatchOpponent {
-    return { name: `${this.rng.pick(SURNAMES)}高校`, level: this.rng.pick(['above', 'equal', 'below'] as const) };
+    const level = this.rng.pick(['above', 'equal', 'below'] as const);
+    const g = SCHOOLS.practiceGap;
+    const strength = Math.round((this.ownStrength() + g[level] + this.rng.normal() * g.noise) * 10) / 10;
+    return { name: `${this.rng.pick(SURNAMES)}高校`, level, strength };
+  }
+
+  /** 自チームの強さ（自動で決めた先発7人の6能力の平均） */
+  ownStrength(): number {
+    const ps = this.active();
+    return ps.length >= 6 ? teamStrength(ps) : 0;
   }
 
   /** 大会が近い（closeDays 日以内）ので、練習試合を申し込めない */
   matchClosed(): boolean {
+    if (this.tournamentDay !== null && this.tournamentDay - this.day <= PRACTICE_MATCH.closeDays) return true;
     return FIXED_EVENTS.some(f => {
       if (!f.stop) return false;
       const d = indexOf(f.month, f.day);
@@ -350,6 +416,7 @@ export class Season {
   }
 
   private ready() {
+    if (this.pendingMatch) throw new Error('試合をしてください');
     if (this.matchChoices) throw new Error('練習試合の相手を選んでください');
     if (this.matchInvite) throw new Error('練習試合の申し込みに返事をしてください');
     if (this.pending) throw new Error('イベントの選択肢を先に選んでください');
@@ -402,8 +469,9 @@ export class Season {
       if (first) this.openMonth(notes);
       const matchDay = this.scheduledMatch?.day === this.day;
       // 大会と練習試合の日は必ず止まる。それ以外の行事は止まらず、通り過ぎても起きる（止まった時は下の land で起きる）
-      const stop = here.kind === 'fixed' && !!FIXED_EVENTS.find(f => f.id === here.fixedId)?.stop;
-      if (stop || matchDay) break;
+      const stop = here.kind === 'fixed' && this.stopsAt(here.fixedId!);
+      const tourDay = this.tournamentDay === this.day;
+      if (stop || matchDay || tourDay) break;
       // 月初めは一時停止するだけ（練習指示を変えてから残りの日数を進む）。ちょうど止まった時は普通に止まる
       if (first && left > 0) {
         if (here.kind === 'fixed') this.land(here, card, notes);
@@ -421,8 +489,15 @@ export class Season {
     if (this.scheduledMatch?.day === this.day) {
       match = this.scheduledMatch;
       this.scheduledMatch = null;
-      notes.push(`練習試合：${match.opponent.name}（試合とつなぐのは第3段階）`);
+      notes.push(`練習試合：${match.opponent.name}`);
+      const o = match.opponent;
+      this.pendingMatch = { kind: 'practice', title: '練習試合', opponent: { id: `pm-${this.day}`, name: o.name, strength: o.strength }, bestOf: 3, limit: false };
       this.trigger({ fixed: match.via === 'manager' ? 'managerMatch' : 'practiceMatch' }, '', notes);
+    }
+    // 予選の次の回戦の日
+    if (this.tournamentDay === this.day) {
+      this.tournamentDay = null;
+      this.nextBout(notes);
     }
     const event = this.land(panel, card, notes);
     this.campHand();
@@ -434,6 +509,149 @@ export class Season {
       ...(this.matchInvite ? { matchInvite: this.matchInvite } : {}),
       ...(match ? { match } : {}),
     };
+  }
+
+  // ---------------- 大会・試合 ----------------
+
+  /** その行事の日に止まるか：大会以外は stop のとおり。本戦は予選を勝ち抜いた時だけ */
+  private stopsAt(fixedId: string): boolean {
+    const f = FIXED_EVENTS.find(x => x.id === fixedId);
+    if (!f?.stop) return false;
+    if (STOP_TOURNAMENTS.has(fixedId)) {
+      const def = TOURNAMENTS[fixedId as TournamentDef['id']];
+      return def.kind === 'prelim' || !!this.qualified[def.id];
+    }
+    return true;
+  }
+
+  /** 大会が始まる：出場校を決めてトーナメントを作り、自チームの1回戦を待つ */
+  private startTournament(id: TournamentDef['id'], notes: string[]) {
+    const def = TOURNAMENTS[id];
+    if (def.kind === 'national' && !this.qualified[id]) { notes.push(`${def.name}（出場なし）`); return; }
+    const own: Entry = { id: 'own', name: '自校', strength: this.ownStrength(), own: true };
+    const rng = new Rng(hashSeed(`${id}-${this.year}-${this.seed}`));
+    const others: Entry[] = def.kind === 'prelim'
+      ? this.schools.map(sc => ({ id: sc.id, name: sc.name, strength: sc.strength }))
+      : makeNationals(rng, 31, new Set(this.schools.map(sc => sc.name)));
+    const t = new Tournament(def, [own, ...others], rng, this.year);
+    this.tournaments[id] = t;
+    notes.push(`${def.name}が始まりました`);
+    this.nextBout(notes);
+  }
+
+  /** 自チームの次の試合を待つ（人数が足りなければ不戦敗） */
+  private nextBout(notes: string[]) {
+    const t = Object.values(this.tournaments).find(x => x && !x.over && x.ownBout());
+    if (!t) return;
+    const opp = t.ownOpponent()!;
+    if (this.active().length < 6) {
+      notes.push(`${t.def.name} ${t.roundName}：人数が足りず不戦敗`);
+      this.afterBout(t, false, '0-' + (t.bestOf === 5 ? 3 : 2), notes);
+      return;
+    }
+    this.pendingMatch = {
+      kind: 'tournament', tournamentId: t.def.id, title: `${t.def.name} ${t.roundName}`,
+      opponent: { id: opp.id, name: opp.name, strength: opp.strength }, bestOf: t.bestOf, limit: true,
+    };
+  }
+
+  /** 他校同士の試合（試合の計算を結果だけで回す） */
+  private boutSim(t: Tournament): BoutSim {
+    return (a, b, bestOf, key) => {
+      if (quickBouts) {
+        const aWins = new Rng(hashSeed(key + t.year)).chance(1 / (1 + Math.exp(-(a.strength - b.strength) / 4)));
+        return { aWins, sets: bestOf === 5 ? '3-1' : '2-1' };
+      }
+      const ta = this.schoolTeam(a, `${key}-a`);
+      const tb = this.schoolTeam(b, `${key}-b`);
+      const m = runMatch({ gender: this.gender, bestOf, seed: hashSeed(`${key}-${t.year}`), teams: { A: ta.team, B: tb.team }, bench: { A: ta.bench, B: tb.bench } });
+      const sets = m.results.map(x => ({ own: x.A, opp: x.B }));
+      return { aWins: m.winner === 'A', sets: setCount(sets) };
+    };
+  }
+
+  /** 学校の部員と並び（その学校・年度で同じ部員） */
+  private schoolTeam(e: { id: string; name: string; strength: number }, key: string) {
+    const seed = hashSeed(`${e.id}-${this.year}-${this.seed}`);
+    const players = makeSchoolPlayers(e, this.gender, seed, this.year);
+    return autoLineup(players, e.name, randomTactics(new Rng(hashSeed(key))));
+  }
+
+  /** 登録の初期値（大会は12人まで。練習試合は全員） */
+  defaultRegistration(): string[] {
+    const ps = this.active();
+    return this.pendingMatch?.limit ? autoRegister(ps) : ps.map(p => p.id);
+  }
+
+  /** 試合の画面に渡すもの。registered を省くと登録の初期値 */
+  matchSetup(registered = this.defaultRegistration()): MatchSetup {
+    const pm = this.pendingMatch;
+    if (!pm) throw new Error('試合はありません');
+    const ps = this.active();
+    if (pm.limit) {
+      const err = checkRegistration(ps, registered);
+      if (err) throw new Error(err);
+    }
+    const own = autoLineup(ps.filter(p => registered.includes(p.id)), '自校', { attack: 'balance', block: 'spread', receive: 'back' });
+    const opp = this.schoolTeam(pm.opponent, `${pm.title}-${this.day}-opp`);
+    const starters = [...own.team.rotation.map(s => s.player.id), ...(own.team.libero ? [own.team.libero.id] : [])];
+    return {
+      options: { gender: this.gender, bestOf: pm.bestOf, seed: hashSeed(`${pm.title}-${this.year}-${this.day}`), teams: { A: own.team, B: opp.team }, bench: { A: own.bench, B: opp.bench } },
+      starters, registered,
+    };
+  }
+
+  /** 結果だけ：試合を全部おまかせで計算して、結果を入れる */
+  playMatch(registered?: string[]): StepResult {
+    const setup = this.matchSetup(registered);
+    const m = runMatch(setup.options);
+    return this.finishMatch(outcomeOf(m, setup.starters), setup.registered);
+  }
+
+  /** 試合の結果を入れる（試合画面で行った時もここ）。経験・報奨・大会の進み */
+  finishMatch(o: MatchOutcome, registered: string[]): StepResult {
+    const pm = this.pendingMatch;
+    if (!pm) throw new Error('試合はありません');
+    this.pendingMatch = null;
+    const notes: string[] = [];
+    applyMatchExp(this.active(), o, registered);
+    notes.push(`${pm.title}：${pm.opponent.name}に${setCount(o.sets, false)}で${o.win ? '勝ち' : '負け'}`);
+    if (pm.kind === 'practice') {
+      if (o.win) notes.push(`報奨 ${this.rewardWin('practice').toLocaleString()}円`);
+    } else {
+      const t = this.tournaments[pm.tournamentId!]!;
+      if (o.win) notes.push(`報奨 ${this.rewardWin('tournament', t.round + 1).toLocaleString()}円`);
+      this.afterBout(t, o.win, setCount(o.sets), notes);
+    }
+    return { moved: 0, notes, ...this.drain() };
+  }
+
+  /** 自チームの試合の後：他校同士の試合を決め、次の回戦へ。負ければ最後まで決めて大会を終える */
+  private afterBout(t: Tournament, win: boolean, sets: string, notes: string[]) {
+    t.recordOwn(win, sets);
+    const sim = this.boutSim(t);
+    t.playOthers(sim);
+    t.advance();
+    if (!win || t.over) {
+      t.finish(sim);
+      const res = t.ownResult();
+      notes.push(`${t.def.name}：${res.text}（優勝 ${t.champion!.name}）`);
+      if (t.over && t.ownAlive && t.def.next) {
+        this.qualified[t.def.next] = true;
+        notes.push(`${TOURNAMENTS[t.def.next].name}に出場します`);
+      }
+      return;
+    }
+    if (t.def.kind === 'prelim') {
+      const d = t.def.dates[t.round];
+      this.tournamentDay = indexOf(d.month, d.day);
+      notes.push(`次は${t.roundName}（${d.month}/${d.day}）`);
+    } else {
+      // 本戦は続けて試合をする（間に練習なし。日付だけ進む）
+      this.day++;
+      for (const p of this.active()) dailyCondition(p, this.rng);
+      this.nextBout(notes);
+    }
   }
 
   /** 月初め：練習指示を変えられるようにする。合宿の1ヶ月前なら、開催するかの返事を待つ */
@@ -513,6 +731,10 @@ export class Season {
       case 'fixed': {
         const name = FIXED_EVENTS.find(f => f.id === panel.fixedId)?.name ?? panel.fixedId;
         // 結果を出すだけの行事（入学式・身体測定・引退・卒業式・合宿）は「中身はまだありません」を出さない
+        if (STOP_TOURNAMENTS.has(panel.fixedId ?? '')) {
+          this.startTournament(panel.fixedId as TournamentDef['id'], notes);
+          return null;
+        }
         const system = this.rosterEvent(panel.fixedId ?? '', notes);
         const def = FIXED_EVENTS.find(f => f.id === panel.fixedId);
         return this.trigger({ fixed: def?.kind ?? panel.fixedId }, system ? '' : `${name}（中身はまだありません）`, notes);

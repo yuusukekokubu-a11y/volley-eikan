@@ -4,7 +4,7 @@
 // 画面の見た目は第4段階（デザイン）で作り込む。
 
 import { FATIGUE } from '../sim/constants';
-import { Match, type BestOf } from '../sim/game';
+import { Match, type BestOf, type MatchOptions } from '../sim/game';
 import { aceOf, MANAGER_MAX, MANAGER_SKILL_IDS, MANAGER_SKILLS } from '../sim/manager';
 import { OWN, SetGame, type StopInfo } from '../sim/match';
 import { makeBench, makeTeam } from '../sim/sample';
@@ -42,11 +42,19 @@ let shownScore: Record<TeamId, number> = { A: 0, B: 0 };
 /** 画面に見せているコートの向き。最終セットの8点のコートチェンジは、そのラリーの再生が終わってから反映する */
 let viewSwapped = false;
 let stopAfter: StopInfo | null = null;
+/**
+ * 育成から開いた時（?embed=1）：親の画面から試合の設定（MatchOptions）を受け取って試合をし、終わったら結果を親へ返す。
+ * 試合の形・男女・監督特能は親の設定のまま（変えられない）
+ */
+const embed = params.get('embed') === '1';
+let embedOptions: MatchOptions | null = null;
+/** 第1セットの始まりのコート上の選手とリベロ（試合の経験の「スタメン」） */
+let starters: string[] = [];
 let stopped = false;
 let counted = false;
 
 function newMatch() {
-  match = new Match({
+  match = embedOptions ? new Match({ ...embedOptions, managerSkills }) : new Match({
     gender, bestOf, seed: matchSeed++, managerSkills,
     teams: { A: makeTeam(1, 'A', gender, 55), B: makeTeam(2, 'B', gender, 55) },
     bench: { A: makeBench(1, 'A', gender, 55), B: makeBench(2, 'B', gender, 55) },
@@ -64,6 +72,10 @@ function newMatch() {
 
 /** 次のセットを始める */
 function beginSet() {
+  if (match.results.length === 0) {
+    const a = match.lineups.A;
+    starters = [...a.rotation.map(s => s.player.id), ...(a.libero ? [a.libero.id] : [])];
+  }
   game = match.startSet();
   closePanel();
   shownScore = { A: 0, B: 0 };
@@ -279,7 +291,9 @@ function renderLineup() {
   };
   const lib = team.libero;
   const next = match.results.length + 1;
-  const head = pre
+  const head = pre && embed
+    ? `<div class="reason">試合前（${bestOf}セットマッチ）</div>`
+    : pre
     ? `<div class="reason">試合前</div><div class="hint">試合の形</div>
        <span class="picklist">${([3, 5] as BestOf[]).map(n => `<button class="pick ${bestOf === n ? 'on' : ''}" data-best="${n}">${n}セットマッチ</button>`).join('')}</span>`
     : `<div class="big">${setsText()}</div><div class="reason">セット間（次は第${next}セット${match.nextIsFinal ? '・最終' : ''}）</div>${resultsHtml()}`;
@@ -291,7 +305,7 @@ function renderLineup() {
       <button class="zone" data-rot="1">並びを回す</button></div></div>`;
   const benchRows = match.bench[OWN].map(p =>
     `<button class="pick ${sel({ kind: 'bench', id: p.id })}" data-bench="${p.id}">${p.number} ${ROLE_NAME[bestRole(p)]}${tiredHtml(p, match.fatigue) ? '（疲れ）' : ''}</button>`).join('');
-  const skillRow = pre
+  const skillRow = pre && !embed
     ? `<div class="brow"><span class="label">監督特能</span><span class="picklist">${MANAGER_SKILL_IDS.map(id =>
       `<button class="pick ${managerSkills.includes(id) ? 'on' : ''}" data-ms="${id}">${MANAGER_SKILLS[id].name}</button>`).join('')}</span></div>
       <div class="hint">監督特能は試作用に3つまで選べる（獲得・失効は育成の段階で作る）</div>`
@@ -378,6 +392,16 @@ function openMatchOver() {
   $('stopRight').innerHTML = `<div class="card">${resultsHtml()}</div>`;
   const box = $('stopButtons');
   box.innerHTML = '';
+  if (embed) {
+    // 育成へ戻る：結果を親へ返す
+    box.append(btn('育成に戻る', () => {
+      window.parent.postMessage({
+        type: 'matchResult',
+        outcome: { win: match.winner === 'A', sets: match.results.map(r => ({ own: r.A, opp: r.B })), lines: match.lines, starters },
+      }, '*');
+    }), modeButton(openMatchOver));
+    return;
+  }
   box.append(btn('新しい試合', newMatch), modeButton(openMatchOver));
 }
 
@@ -593,5 +617,17 @@ $('btnGender').textContent = gender === 'male' ? '男子' : '女子';
 window.addEventListener('resize', layout);
 
 layout();
-newMatch();
+if (embed) {
+  // 試合の形・男女の切り替えと、試作用の監督特能はなし（育成の設定のまま）
+  managerSkills = [];
+  $('btnGender').style.display = 'none';
+  window.addEventListener('message', ev => {
+    if (ev.source !== window.parent || ev.data?.type !== 'matchSetup') return;
+    embedOptions = ev.data.options as MatchOptions;
+    gender = embedOptions.gender;
+    bestOf = embedOptions.bestOf;
+    newMatch();
+  });
+  window.parent.postMessage({ type: 'matchReady' }, '*');
+} else newMatch();
 requestAnimationFrame(tick);

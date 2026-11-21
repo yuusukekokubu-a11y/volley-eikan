@@ -24,7 +24,7 @@ export function gymMul(level: number): number {
 }
 
 /** 能力が高いほど伸びにくい（上限100は全員同じ） */
-function growth(v: number): number {
+export function growth(v: number): number {
   return Math.max(PRACTICE_GAIN.min, PRACTICE_GAIN.pivot - v * PRACTICE_GAIN.slope);
 }
 

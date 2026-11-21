@@ -183,3 +183,69 @@ export const ROSTER = {
   /** 身体測定：身長の伸びしろのうち、2年の4月に伸びる割合（残りは3年の4月）。1年は入学したばかりで伸びない */
   heightShareSecond: 0.6,
 };
+
+/** 大会の登録：人数と、そのうちリベロ（一番適性の高い位置がリベロの選手）の人数の上限 */
+export const SQUAD_LIMIT = { size: 12, libero: 2 };
+
+/**
+ * 相手校。県内は31校（自チームと合わせて32校）で毎年同じ。強さ＝選手の能力の平均の目安。
+ * 名門が少なく、中堅・弱小が多い（bands）。本戦の相手（他県の代表）は national の範囲で、その都度作る
+ */
+export const SCHOOLS = {
+  bands: [
+    { count: 2, strength: 66 },
+    { count: 4, strength: 58 },
+    { count: 8, strength: 50 },
+    { count: 10, strength: 43 },
+    { count: 7, strength: 36 },
+  ],
+  spread: 2,
+  national: { min: 56, max: 72 },
+  nationalPrefix: ['', '県立', '私立', '第一', '附属'],
+  /** 控え（8人目から）は先発より少し弱い */
+  benchGap: 4,
+  /** 青特能の数：(強さ − traitFrom) ÷ traitPer 個くらい。赤は1人ごとに redChance */
+  traitFrom: 40,
+  traitPer: 16,
+  /** 部員ごとの6能力の平均のばらつき */
+  playerSpread: 3,
+  redChance: 0.1,
+  /** 年度の終わりの強さの動き：成績（勝った試合の数）で上下し、作った時の強さへ少し戻る。ばらつき */
+  drift: { perWin: 0.15, expectedWins: 1, toBase: 0.3, noise: 1.2, min: 30, max: 76 },
+  /** 練習試合の相手の強さ：自チームの強さとの差（格上・同格・格下） */
+  practiceGap: { above: 6, equal: 0, below: -6, noise: 2 },
+  names: [
+    '青葉', '若葉', '桜ヶ丘', '緑ヶ丘', '港南', '川北', '山手', '城南', '城北', '旭', '朝日', '白鷺', '清風', '明誠', '東陽', '西陵',
+    '南台', '北斗', '中央', '富士見', '泉', '松陰', '紅葉', '翠嶺', '光陽', '大和', '常盤', '湊', '鶴見', '高台', '丘陵', '浜風',
+    '霞ヶ丘', '天神', '水城', '春日', '若松', '日向', '八幡', '新町', '栄町', '本郷', '桜台', '弥生', '千歳', '長浜', '岬', '藤ヶ丘',
+    '星ヶ丘', '竹園', '梅林', '杉並', '野田', '田原', '森山', '岩倉', '宮前', '秋津', '飛鳥', '睦', '高砂', '有明', '磯辺', '一宮',
+  ],
+};
+
+/** 大会の日程。予選は1回戦ごとに数日あけ（その日に止まる）、本戦は続けて試合をする（間に練習なし） */
+export interface TournamentDef {
+  id: 'interhighPrelim' | 'interhigh' | 'harukouPrelim' | 'harukou';
+  name: string;
+  kind: 'prelim' | 'national';
+  /** 1回戦ごとの日付（本戦は最初の日だけ。そこから1日ずつ） */
+  dates: { month: number; day: number }[];
+  /** 1回戦ごとのセット数（32校で5回戦：1回戦・2回戦・準々決勝・準決勝・決勝） */
+  bestOf: (3 | 5)[];
+  /** 予選なら、勝ち抜くと出られる本戦 */
+  next?: 'interhigh' | 'harukou';
+}
+
+export const TOURNAMENTS: Record<TournamentDef['id'], TournamentDef> = {
+  interhighPrelim: { id: 'interhighPrelim', name: 'インターハイ予選', kind: 'prelim', dates: [{ month: 6, day: 1 }, { month: 6, day: 4 }, { month: 6, day: 7 }, { month: 6, day: 10 }, { month: 6, day: 13 }], bestOf: [3, 3, 3, 3, 3], next: 'interhigh' },
+  interhigh: { id: 'interhigh', name: 'インターハイ本戦', kind: 'national', dates: [{ month: 7, day: 28 }], bestOf: [3, 3, 3, 3, 5] },
+  harukouPrelim: { id: 'harukouPrelim', name: '春高予選', kind: 'prelim', dates: [{ month: 11, day: 1 }, { month: 11, day: 4 }, { month: 11, day: 7 }, { month: 11, day: 10 }, { month: 11, day: 13 }], bestOf: [3, 3, 3, 3, 3], next: 'harukou' },
+  harukou: { id: 'harukou', name: '春高本戦', kind: 'national', dates: [{ month: 1, day: 5 }], bestOf: [3, 3, 3, 5, 5] },
+};
+
+export const ROUND_NAMES = ['1回戦', '2回戦', '準々決勝', '準決勝', '決勝'];
+
+/**
+ * 試合の経験：練習何日分か（練習指示の能力に入る。おまかせなら6能力に等分）。
+ * スタメン＞途中出場＞ベンチ入り（登録されたが出ていない）＞ベンチ外（登録されていない）
+ */
+export const MATCH_EXP = { starter: 3, sub: 2, bench: 1, out: 0.5 };
