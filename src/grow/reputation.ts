@@ -51,14 +51,14 @@ export function rollSkill(rng: Rng, source: SkillSource, points: number): string
   return rng.weighted(ids.map(id => ({ item: id, w: MANAGER_GAIN.weights[id] ?? 1 })))!;
 }
 
-/** 覚える：持っていれば期限が延び、空きがあれば加わる。3つ持っていれば false（入れ替えか見送りを選ぶ） */
-export function learnSkill(owned: OwnedSkill[], id: string, year: number): boolean {
+/** 覚える：持っていれば期限が延び（refresh）、空きがあれば加わる（new）。3つ持っていれば full（入れ替えか見送りを選ぶ） */
+export function learnSkill(owned: OwnedSkill[], id: string, year: number): 'new' | 'refresh' | 'full' {
   const until = year + MANAGER_GAIN.years - 1;
   const have = owned.find(s => s.id === id);
-  if (have) { have.until = Math.max(have.until, until); return true; }
-  if (owned.length >= MANAGER_GAIN.max) return false;
+  if (have) { have.until = Math.max(have.until, until); return 'refresh'; }
+  if (owned.length >= MANAGER_GAIN.max) return 'full';
   owned.push({ id, until });
-  return true;
+  return 'new';
 }
 
 /** 年度の初め：期限の切れた特能を外す。外した ID を返す */

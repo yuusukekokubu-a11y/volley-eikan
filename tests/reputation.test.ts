@@ -68,14 +68,14 @@ describe('評判', () => {
 describe('監督特能の獲得・失効', () => {
   it('3つまで。取り直すと期限が延び、3年で失効する', () => {
     const owned: OwnedSkill[] = [];
-    expect(learnSkill(owned, 'geki', 1)).toBe(true);
+    expect(learnSkill(owned, 'geki', 1)).toBe('new');
     expect(owned[0].until).toBe(1 + MANAGER_GAIN.years - 1);
-    expect(learnSkill(owned, 'geki', 2)).toBe(true);
+    expect(learnSkill(owned, 'geki', 2)).toBe('refresh');
     expect(owned).toHaveLength(1);
     expect(owned[0].until).toBe(2 + MANAGER_GAIN.years - 1);
     learnSkill(owned, 'tatenaoshi', 2);
     learnSkill(owned, 'serveKuzushi', 2);
-    expect(learnSkill(owned, 'aceTaisaku', 2)).toBe(false);
+    expect(learnSkill(owned, 'aceTaisaku', 2)).toBe('full');
     expect(expireSkills(owned, 4)).toEqual([]);
     expect(expireSkills(owned, 5).sort()).toEqual(['geki', 'serveKuzushi', 'tatenaoshi'].sort());
   });
@@ -98,10 +98,10 @@ describe('監督特能の獲得・失効', () => {
     for (const id of ['geki', 'tatenaoshi', 'serveKuzushi']) learnSkill(c.managerSkills, id, 1);
     s.skillOffer = { id: 'dataBunseki', source: 'seminar' };
     expect(() => s.useCard(s.firstUsable())).toThrow();
-    s.answerSkill('geki');
+    expect(s.answerSkill('geki').text).toBe('『檄』を手放し、『データ分析』を覚えた！');
     expect(c.managerSkills.map(x => x.id).sort()).toEqual(['dataBunseki', 'serveKuzushi', 'tatenaoshi']);
     s.skillOffer = { id: 'aceTaisaku', source: 'ob' };
-    s.answerSkill(null);
+    expect(s.answerSkill(null).text).toBe('今回は見送った');
     expect(c.managerSkills).toHaveLength(3);
     expect(c.managerSkills.some(x => x.id === 'aceTaisaku')).toBe(false);
   });
@@ -126,5 +126,29 @@ describe('監督特能の獲得・失効', () => {
       if (!s.pendingMatch) finishStep(s, s.useCard(s.firstUsable()));
     }
     expect(s.matchSetup().options.managerSkills).toContain('geki');
+  });
+
+  it('文章：研修会は覚えなくても出る。失効は2つの理由からランダム', () => {
+    const c = new Career({ seed: 6, squad: squad(6), events: [] });
+    const s = c.season;
+    const said: string[] = [];
+    let seminar = false;
+    for (let g = 0; g < 600 && !s.over && !seminar; g++) {
+      const r = finishStep(s, s.useCard(s.firstUsable()));
+      for (const m of r.messages ?? []) said.push(m.text);
+      if (r.notes.includes('研修会パネル')) seminar = true;
+      while (s.pending) s.choose(0);
+      if (s.skillOffer) s.answerSkill(null);
+      if (s.matchChoices) s.chooseMatch(0);
+      if (s.matchInvite) s.answerInvite(false);
+      while (s.pendingMatch) { s.playMatch(); if (s.skillOffer) s.answerSkill(null); }
+    }
+    expect(seminar).toBe(true);
+    expect(said).toContain('監督、近くで指導者の研修会があるそうですよ！');
+    expect(said.some(t => t === '研修会に参加した。今回は特に得るものはなかった……' || /^研修会で、監督特能『.+』を学んだ！$/.test(t) || /を磨き直した/.test(t) || /3つで手一杯/.test(t))).toBe(true);
+    learnSkill(c.managerSkills, 'geki', 1);
+    playYear(s);
+    c.nextYear(); playYear(c.season); c.nextYear(); playYear(c.season); c.nextYear();
+    if (c.expired.includes('geki')) expect(c.expiredMessages.some(m => /監督特能『檄』が通用しなくなった……$/.test(m.text))).toBe(true);
   });
 });

@@ -17,6 +17,26 @@ export const TEXTS = {
   matchAsk: 'どの高校に練習試合を申し込みますか？',
   matchDecided: '{school}との練習試合が{day}日（土）に決まりました',
   matchInvite: '監督、{school}から練習試合の申し込みが来ています！',
+  // 監督特能（{skill} は監督特能の名前）
+  seminarIntro: '監督、近くで指導者の研修会があるそうですよ！',
+  seminarGot: '研修会で、監督特能『{skill}』を学んだ！',
+  seminarNone: '研修会に参加した。今回は特に得るものはなかった……',
+  obVisit: 'OBの{name}（{year}年度卒）が練習を見に来てくれた！',
+  obGotLine: '{name}「監督、卒業してから気づいたことがあるんです」',
+  obNoneLine: '{name}「後輩たち、いい顔してますね。また来ます！」',
+  coachLine: '{school}の監督「いい試合でした。うちでやっている作戦、よかったら参考にしてください」',
+  cupGot: '{cup}での戦いを通して、監督特能『{skill}』をつかんだ！',
+  skillGot: '監督特能『{skill}』を覚えた！',
+  skillRefresh: '監督特能『{skill}』を磨き直した！（期限が延びた）',
+  skillExpire: [
+    '戦術の流行が変わり、監督特能『{skill}』が通用しなくなった……',
+    '他校に研究され、監督特能『{skill}』が通用しなくなった……',
+  ],
+  skillFull: '監督特能『{skill}』を覚えられそうだ。でも、今は3つで手一杯……',
+  skillRelease: '{skill}を手放す',
+  skillSkip: '見送る',
+  skillReplaced: '『{old}』を手放し、『{skill}』を覚えた！',
+  skillSkipped: '今回は見送った',
 };
 
 /** {key} を差し込む */

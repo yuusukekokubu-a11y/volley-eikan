@@ -42,7 +42,7 @@ for (let rank = 0; rank < REPUTATION.ranks.length; rank++) {
           if (s.pendingMatch) res.push(s.playMatch());
         }
         for (const r of res) for (const n of r.notes) {
-          const m = n.match(/^(.+)：監督特能「.+」を覚え(た|られる)/);
+          const m = n.match(/^(.+)：監督特能「.+」を(覚えた|覚えられる|磨き直した)/);
           if (m) { got++; by[m[1]] = (by[m[1]] ?? 0) + 1; }
         }
       }

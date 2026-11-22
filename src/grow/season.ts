@@ -47,8 +47,8 @@ export interface SeasonOptions {
   reputation?: Reputation;
   /** 持っている監督特能（育成全体で持つ） */
   managerSkills?: OwnedSkill[];
-  /** 卒業生がいる（OBパネルを置く） */
-  hasOB?: boolean;
+  /** 卒業生の名簿（OBパネルで来るOB。いればOBパネルを置く） */
+  obs?: Graduate[];
 }
 
 /** 試合を待っている（大会の1試合・練習試合）。playMatch（結果だけ）か、試合画面で行って finishMatch で続ける */
@@ -195,6 +195,8 @@ export class Season {
   repGained = 0;
   /** 監督特能の入れ替えか見送りを待っている */
   skillOffer: SkillOffer | null = null;
+  /** 卒業生の名簿（育成全体と共有） */
+  private readonly obs: Graduate[];
   /** 予定している練習試合（1つまで） */
   scheduledMatch: ScheduledMatch | null = null;
   /** 申し込みカードを使って、相手を選ぶのを待っている3校 */
@@ -203,7 +205,7 @@ export class Season {
   matchInvite: MatchOpponent | null = null;
 
   constructor(o: SeasonOptions) {
-    this.board = makeBoard(o.seed, { ob: !!o.hasOB });
+    this.board = makeBoard(o.seed, { ob: !!o.obs?.length });
     this.year = o.year ?? 1;
     this.squad = o.squad;
     this.policy = o.policy ?? 'all';
@@ -212,6 +214,7 @@ export class Season {
     // 年度の初めに部費が入る（評判による増減は第3段階で）
     this.reputation = o.reputation ?? { points: 0 };
     this.managerSkills = o.managerSkills ?? [];
+    this.obs = o.obs ?? [];
     this.money = o.money ?? REPUTATION.budget[rankOf(this.reputation.points)];
     this.equipment = [...(o.equipment ?? [])];
     this.events = o.events ?? EVENTS;
@@ -641,31 +644,52 @@ export class Season {
     notes.push(`評判 +${v}`);
   }
 
-  /** 監督特能の獲得の機会（確率は獲得の場と評判で決まる） */
-  private trySkill(source: SkillSource, notes: string[]) {
-    const id = rollSkill(this.rng, source, this.reputation.points);
-    if (!id) return;
-    const name = MANAGER_SKILLS[id].name;
-    if (learnSkill(this.managerSkills, id, this.year)) {
-      notes.push(`${SOURCE_NAME[source]}：監督特能「${name}」を覚えた`);
-      this.say(`監督特能「${name}」を覚えた（${SOURCE_NAME[source]}）`);
-    } else {
-      this.skillOffer = { id, source };
-      notes.push(`${SOURCE_NAME[source]}：監督特能「${name}」を覚えられる（3つ持っているので入れ替えるか見送るかを選ぶ）`);
+  /**
+   * 監督特能の獲得の機会（確率は獲得の場と評判で決まる）。文章はこくぶさん作（texts.ts）。
+   * 研修会・OBは覚えなくても文章が出る。他校の監督・大会の実績は覚えた時だけ
+   */
+  private trySkill(source: SkillSource, notes: string[], ctx: { school?: string; cup?: string } = {}) {
+    let ob: Graduate | undefined;
+    if (source === 'seminar') this.say(TEXTS.seminarIntro, 'manager');
+    if (source === 'ob') {
+      ob = this.obs.length ? this.rng.pick(this.obs) : undefined;
+      if (ob) this.say(fill(TEXTS.obVisit, { name: ob.name, year: ob.gradYear }));
     }
+    const id = rollSkill(this.rng, source, this.reputation.points);
+    if (!id) {
+      if (source === 'seminar') this.say(TEXTS.seminarNone);
+      if (source === 'ob' && ob) this.say(fill(TEXTS.obNoneLine, { name: ob.name }));
+      return;
+    }
+    const skill = MANAGER_SKILLS[id].name;
+    // 覚えるきっかけの文章
+    if (source === 'ob' && ob) this.say(fill(TEXTS.obGotLine, { name: ob.name }));
+    if (source === 'coach') this.say(fill(TEXTS.coachLine, { school: ctx.school ?? '相手校' }));
+    const result = learnSkill(this.managerSkills, id, this.year);
+    if (result === 'full') {
+      this.skillOffer = { id, source };
+      notes.push(`${SOURCE_NAME[source]}：監督特能「${skill}」を覚えられる（3つ持っているので入れ替えるか見送るかを選ぶ）`);
+      this.say(fill(TEXTS.skillFull, { skill }));
+      return;
+    }
+    notes.push(`${SOURCE_NAME[source]}：監督特能「${skill}」を${result === 'refresh' ? '磨き直した' : '覚えた'}`);
+    if (result === 'refresh') this.say(fill(TEXTS.skillRefresh, { skill }));
+    else if (source === 'seminar') this.say(fill(TEXTS.seminarGot, { skill }));
+    else if (source === 'cup') this.say(fill(TEXTS.cupGot, { skill, cup: ctx.cup ?? '大会' }));
+    else this.say(fill(TEXTS.skillGot, { skill }));
   }
 
-  /** 3つ持っている時：replaceId と入れ替える（null なら見送る） */
-  answerSkill(replaceId: string | null): Message | null {
+  /** 3つ持っている時：replaceId を手放して覚える（null なら見送る） */
+  answerSkill(replaceId: string | null): Message {
     const offer = this.skillOffer;
     if (!offer) throw new Error('監督特能の入れ替えは待っていません');
     this.skillOffer = null;
-    if (!replaceId) return null;
+    if (!replaceId) return { text: TEXTS.skillSkipped };
     const i = this.managerSkills.findIndex(x => x.id === replaceId);
     if (i < 0) throw new Error('その監督特能は持っていません');
     this.managerSkills.splice(i, 1);
     learnSkill(this.managerSkills, offer.id, this.year);
-    return { text: `監督特能「${MANAGER_SKILLS[replaceId].name}」を「${MANAGER_SKILLS[offer.id].name}」に入れ替えた` };
+    return { text: fill(TEXTS.skillReplaced, { old: MANAGER_SKILLS[replaceId].name, skill: MANAGER_SKILLS[offer.id].name }) };
   }
 
   /** 結果だけ：試合を全部おまかせで計算して、結果を入れる */
@@ -687,7 +711,7 @@ export class Season {
       if (o.win) notes.push(`報奨 ${this.rewardWin('practice').toLocaleString()}円`);
       if (o.win && pm.level !== 'below') this.gainRep(REPUTATION.gain.practiceWin, notes);
       // 練習試合の後：他校の監督から教わることがある
-      this.trySkill('coach', notes);
+      this.trySkill('coach', notes, { school: pm.opponent.name });
     } else {
       const t = this.tournaments[pm.tournamentId!]!;
       if (o.win) notes.push(`報奨 ${this.rewardWin('tournament', t.round + 1).toLocaleString()}円`);
@@ -711,12 +735,12 @@ export class Season {
         this.qualified[t.def.next] = true;
         notes.push(`${TOURNAMENTS[t.def.next].name}に出場します`);
         this.gainRep(REPUTATION.gain.qualify, notes);
-        this.trySkill('cup', notes);
+        this.trySkill('cup', notes, { cup: t.def.name });
       }
       if (t.def.kind === 'national') {
         if (t.over && t.ownAlive) this.gainRep(REPUTATION.gain.nationalChampion, notes);
         // 本戦でベスト4以上：大会の実績で監督特能を覚えることがある
-        if (res.wins >= 3) this.trySkill('cup', notes);
+        if (res.wins >= 3) this.trySkill('cup', notes, { cup: t.def.name });
       }
       return;
     }
@@ -807,6 +831,7 @@ export class Season {
       case 'seminar':
       case 'ob':
         notes.push(panel.kind === 'seminar' ? '研修会パネル' : 'OBパネル');
+        if (panel.kind === 'ob' && !this.obs.length) return null;
         this.trySkill(panel.kind, notes);
         return null;
       case 'branch':

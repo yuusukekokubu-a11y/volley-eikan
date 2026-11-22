@@ -5,6 +5,8 @@ import { ENERGY, REPUTATION, SCHOOLS } from './constants';
 import { closeReputation, expireSkills, rankOf, type OwnedSkill, type Reputation } from './reputation';
 import { makePrefecture, type School } from './school';
 import { Rng } from '../sim/rng';
+import { MANAGER_SKILLS } from '../sim/manager';
+import { fill, TEXTS, type Message } from './texts';
 import type { TeamPolicy } from './cards';
 import type { Graduate } from './roster';
 import { Season, type PracticeHook } from './season';
@@ -33,8 +35,9 @@ export class Career {
   readonly reputation: Reputation = { points: 0 };
   /** 持っている監督特能（3つまで。期限つき） */
   readonly managerSkills: OwnedSkill[] = [];
-  /** 前の年度の終わりに失効した監督特能（仮の画面で知らせる） */
+  /** 前の年度の終わりに失効した監督特能と、その文章（仮の画面で知らせる） */
   expired: string[] = [];
+  expiredMessages: Message[] = [];
   private o: CareerOptions;
 
   constructor(o: CareerOptions) {
@@ -67,11 +70,14 @@ export class Career {
     const year = s.year + 1;
     closeReputation(this.reputation, s.repGained);
     this.expired = expireSkills(this.managerSkills, year);
+    // 失効の理由づけは2つからランダム（戦術の流行が変わる／研究される）
+    const rng = new Rng(this.seed * 4999 + year);
+    this.expiredMessages = this.expired.map(id => ({ text: fill(rng.pick(TEXTS.skillExpire), { skill: MANAGER_SKILLS[id].name }) }));
     this.season = new Season({
       seed: this.seedOf(year), squad: s.squad, year, gender: this.gender,
       policy: s.policy as TeamPolicy, money: s.money + REPUTATION.budget[rankOf(this.reputation.points)], equipment: s.equipment, flags: s.flags,
       events: this.o.events, onPractice: this.o.onPractice, schools: this.schools,
-      reputation: this.reputation, managerSkills: this.managerSkills, hasOB: this.graduates.length > 0,
+      reputation: this.reputation, managerSkills: this.managerSkills, obs: this.graduates,
     });
     return this.season;
   }
