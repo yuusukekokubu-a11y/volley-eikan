@@ -624,6 +624,8 @@ if (embed) {
   window.addEventListener('message', ev => {
     if (ev.source !== window.parent || ev.data?.type !== 'matchSetup') return;
     embedOptions = ev.data.options as MatchOptions;
+    // 監督特能は育成で持っているもの
+    managerSkills = embedOptions.managerSkills ?? [];
     gender = embedOptions.gender;
     bestOf = embedOptions.bestOf;
     newMatch();

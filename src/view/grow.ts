@@ -12,6 +12,8 @@ import type { MatchOutcome } from '../grow/matchplay';
 import { isLibero } from '../grow/school';
 import { SQUAD_LIMIT } from '../grow/constants';
 import type { Tournament } from '../grow/tournament';
+import { rankName, schoolRankName } from '../grow/reputation';
+import { MANAGER_SKILLS } from '../sim/manager';
 import { fill, TEXTS, type Message } from '../grow/texts';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
@@ -25,7 +27,7 @@ let seed = Number(params.get('seed') || 1);
 
 const ROLE_NAME: Record<Role, string> = { S: 'セッター', OH: 'アウトサイド', MB: 'ミドル', OP: 'オポジット', L: 'リベロ' };
 const PANEL_NAME: Record<Panel['kind'], string> = {
-  blue: '青', red: '赤', white: '白', green: '緑', yellow: '黄', training: '特訓', branch: '分岐', fixed: '行事',
+  blue: '青', red: '赤', white: '白', green: '緑', yellow: '黄', training: '特訓', seminar: '研修会', ob: 'OB', branch: '分岐', fixed: '行事',
 };
 const ABILITY_NAME: Record<string, string> = { jump: '跳躍', power: 'パワー', speed: 'スピード', technique: 'テクニック', block: 'ブロック', stamina: 'スタミナ' };
 
@@ -59,7 +61,7 @@ function render() {
   const m = season.scheduledMatch;
   const WD = '日月火水木金土';
   $('money').textContent = `お金 ${season.money.toLocaleString()}円${m ? `　練習試合 ${season.board[m.day].month}/${season.board[m.day].day}（${WD[season.weekday(m.day)]}）` : ''}`;
-  $('gym').textContent = `体育館レベル ${season.gym}`;
+  $('gym').textContent = `体育館レベル ${season.gym}　評判 ${rankName(season.reputation.points)}（${Math.round(season.reputation.points)}点）　監督特能 ${season.managerSkills.map(x => `${MANAGER_SKILLS[x.id].name}（${x.until}年目まで）`).join('・') || 'なし'}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
     `<button class="${season.policy === k ? 'on' : ''}" data-policy="${k}">${POLICY[k].name}</button>`).join('');
   for (const b of Array.from($('policy').querySelectorAll<HTMLButtonElement>('button'))) {
@@ -68,7 +70,7 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused || !!season.pendingMatch;
+  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused || !!season.pendingMatch || !!season.skillOffer;
   ($('resume') as HTMLButtonElement).disabled = !season.paused;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
@@ -175,7 +177,20 @@ function nextModal() {
   if (season.pending) openEvent();
   else if (season.matchChoices) openMatchChoices();
   else if (season.matchInvite) openInvite();
+  else if (season.skillOffer) openSkillOffer();
   else if (season.pendingMatch) openMatch();
+}
+
+/** 監督特能を3つ持っている時に新しく覚えられる：入れ替えるか見送るか */
+function openSkillOffer() {
+  const o = season.skillOffer!;
+  $('modalBox').innerHTML = `<div class="text">監督特能「${MANAGER_SKILLS[o.id].name}」（${MANAGER_SKILLS[o.id].desc}）を覚えられます。3つ持っているので、入れ替えるか見送るかを選んでください</div>
+    <div class="choices">${season.managerSkills.map(x => `<button data-sk="${x.id}">${MANAGER_SKILLS[x.id].name}と入れ替える<br><small>${x.until}年目まで</small></button>`).join('')}<button id="skip">見送る</button></div>`;
+  $('modal').classList.remove('hidden');
+  for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-sk]'))) {
+    b.onclick = () => { const m = season.answerSkill(b.getAttribute('data-sk')); log.push(m!.text); $('modal').classList.add('hidden'); showMessages([m!], closeModal); };
+  }
+  ($('skip') as HTMLButtonElement).onclick = () => { season.answerSkill(null); log.push('監督特能を見送った'); closeModal(); };
 }
 
 /** イベント：文章と選択肢 */
@@ -256,7 +271,7 @@ function openMatch() {
       : '<div class="text" style="font-size:13px">練習試合は全員が出られます</div>';
     let err = '';
     try { season.matchSetup(reg); } catch (e) { err = (e as Error).message; }
-    $('modalBox').innerHTML = `<div class="text">${pm.title}：${pm.opponent.name}（強さ ${abilityRank(pm.opponent.strength)}${Math.round(pm.opponent.strength)}・自校 ${abilityRank(season.ownStrength())}${Math.round(season.ownStrength())}）／${pm.bestOf}セットマッチ</div>
+    $('modalBox').innerHTML = `<div class="text">${pm.title}：${pm.opponent.name}（評判 ${schoolRankName(pm.opponent.strength)}・強さ ${abilityRank(pm.opponent.strength)}${Math.round(pm.opponent.strength)}）／自校（評判 ${rankName(season.reputation.points)}・強さ ${abilityRank(season.ownStrength())}${Math.round(season.ownStrength())}）／${pm.bestOf}セットマッチ</div>
       ${regHtml}${err ? `<div class="text" style="color:#ff9d7a;font-size:13px">${err}</div>` : ''}
       <div class="choices"><button id="mAuto" ${err ? 'disabled' : ''}>結果だけ</button><button id="mWatch" ${err ? 'disabled' : ''}>試合を見る</button></div>`;
     for (const b of Array.from($('modalBox').querySelectorAll<HTMLButtonElement>('button[data-reg]'))) {
@@ -341,8 +356,10 @@ function openGraduates() {
 ($('grads') as HTMLButtonElement).onclick = openGraduates;
 ($('cups') as HTMLButtonElement).onclick = () => openCups();
 ($('nextYear') as HTMLButtonElement).onclick = () => {
+  const money = season.money;
   season = career.nextYear();
-  log.push(`${season.year}年目が始まりました（部費 ${MONEY.budget.toLocaleString()}円）`);
+  log.push(`${season.year}年目が始まりました（評判 ${rankName(season.reputation.points)}、部費 ${(season.money - money).toLocaleString()}円）`);
+  if (career.expired.length) log.push(`監督特能が失効しました：${career.expired.map(id => MANAGER_SKILLS[id].name).join('・')}`);
   render();
 };
 ($('rest') as HTMLButtonElement).onclick = () => after(season.rest());

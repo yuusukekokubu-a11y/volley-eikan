@@ -8,6 +8,7 @@ import { SURNAMES } from './names';
 import { makePlayer } from '../sim/sample';
 import { Rng } from '../sim/rng';
 import { TRAITS } from '../sim/traits';
+import { aptitudeFactor } from '../sim/ability';
 import type { Gender, LineupSlot, Player, Role, Tactics, TeamState, TrainKey } from '../sim/types';
 
 /** 学校（自チーム以外） */
@@ -78,6 +79,12 @@ export function makeSchoolPlayers(school: { id: string; strength: number }, gend
     if (red.length && rng.chance(SCHOOLS.redChance)) p.traits.push(rng.pick(red).id);
     out.push(p);
   });
+  // チームの強さ（teamStrength）が学校の強さになるように、全員の能力をそろえてずらす
+  for (let k = 0; k < 3; k++) {
+    const d = school.strength - teamStrength(out);
+    if (Math.abs(d) < 0.3) break;
+    for (const p of out) for (const key of KEYS) p[key] = Math.round(Math.max(1, Math.min(99, p[key] + d)));
+  }
   return out;
 }
 
@@ -128,8 +135,14 @@ export function autoLineup(players: Player[], name: string, tactics: Tactics): {
 /** チームの強さ：自動で決めた先発7人の6能力の平均 */
 export function teamStrength(players: Player[]): number {
   const { team } = autoLineup(players, '', { attack: 'balance', block: 'spread', receive: 'back' });
-  const ps = [...team.rotation.map(s => s.player), ...(team.libero ? [team.libero] : [])];
-  return ps.reduce((a, p) => a + KEYS.reduce((b, k) => b + p[k], 0) / KEYS.length, 0) / ps.length;
+  const slots: [Player, Role][] = [...team.rotation.map(s => [s.player, s.role] as [Player, Role]), ...(team.libero ? [[team.libero, 'L'] as [Player, Role]] : [])];
+  return slots.reduce((a, [p, role]) => a + playerValue(p, role), 0) / slots.length;
+}
+
+/** その位置での選手の値打ち：その位置で大事な能力の平均 × 適性の効き（試合の計算と同じ割合） */
+export function playerValue(p: Player, role: Role): number {
+  const ab = ROLE_KEYS[role].reduce((a, k) => a + p[k], 0) / ROLE_KEYS[role].length;
+  return ab * aptitudeFactor(p, role);
 }
 
 /** 大会の登録（自動）：リベロ（一番適性の高い位置がリベロの選手）は上手い順に決まった人数まで。先発7人を先に入れ、残りは使いやすさの順 */

@@ -16,7 +16,16 @@ const APT_BASE: Record<Role, Record<Role, AptStage>> = {
   L: { S: 1, OH: 1, MB: 0, OP: 0, L: 3 },
 };
 
-type Strength = number; // 能力の平均の目安（0〜100）
+type Strength = number;
+
+/** ポジションの得意：本職ごとに能力へ足す量（試作・相手校・新入生で共通） */
+export const ROLE_BONUS: Record<Role, Partial<Record<'jump' | 'power' | 'speed' | 'technique' | 'block' | 'stamina', number>>> = {
+  S: { technique: 8 },
+  OH: { jump: 5, power: 5 },
+  MB: { jump: 5, block: 8 },
+  OP: { jump: 5, power: 5 },
+  L: { technique: 8 },
+}; // 能力の平均の目安（0〜100）
 
 const ROLE_HEIGHT: Record<Gender, Record<Role, number>> = {
   male: { S: 176, OH: 182, MB: 188, OP: 183, L: 170 },
@@ -42,12 +51,12 @@ export function makePlayer(rng: Rng, id: string, number: number, role: Role, gen
     hand: rollHand(rng),
     looks: rollLooks(rng),
     height: Math.round(ROLE_HEIGHT[gender][role] + rng.normal() * 4),
-    jump: n() + (role === 'MB' || role === 'OH' || role === 'OP' ? 5 : 0),
-    power: n() + (role === 'OH' || role === 'OP' ? 5 : 0),
-    speed: n(),
-    technique: n() + (role === 'S' || role === 'L' ? 8 : 0),
-    block: n() + (role === 'MB' ? 8 : 0),
-    stamina: n(),
+    jump: n() + (ROLE_BONUS[role].jump ?? 0),
+    power: n() + (ROLE_BONUS[role].power ?? 0),
+    speed: n() + (ROLE_BONUS[role].speed ?? 0),
+    technique: n() + (ROLE_BONUS[role].technique ?? 0),
+    block: n() + (ROLE_BONUS[role].block ?? 0),
+    stamina: n() + (ROLE_BONUS[role].stamina ?? 0),
     aptitude: apt,
     traits: [...serve],
     condition: 0,

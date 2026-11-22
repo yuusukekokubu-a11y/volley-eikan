@@ -143,10 +143,8 @@ export const GYM = {
   maxLevel: 19,
 };
 
-/** お金（単位：円）。部費（年度の初めに入る）と、試合の勝利の報奨（後援会・OB会からの支援） */
+/** お金（単位：円）。部費（年度の初めに入る。評判で決まる：REPUTATION.budget）と、試合の勝利の報奨（後援会・OB会からの支援） */
 export const MONEY = {
-  /** 部費：年度の初めに入る額（評判による増減は第3段階で） */
-  budget: 150000,
   /** 勝利の報奨：練習試合1勝、大会1勝（大会は勝ち進むほど roundMul 倍ずつ増える） */
   winPractice: 5000,
   winTournament: 10000,
@@ -200,7 +198,7 @@ export const SCHOOLS = {
     { count: 7, strength: 36 },
   ],
   spread: 2,
-  national: { min: 56, max: 72 },
+  national: { min: 62, max: 76 },
   nationalPrefix: ['', '県立', '私立', '第一', '附属'],
   /** 控え（8人目から）は先発より少し弱い */
   benchGap: 4,
@@ -249,3 +247,47 @@ export const ROUND_NAMES = ['1回戦', '2回戦', '準々決勝', '準決勝', '
  * スタメン＞途中出場＞ベンチ入り（登録されたが出ていない）＞ベンチ外（登録されていない）
  */
 export const MATCH_EXP = { starter: 3, sub: 2, bench: 1, out: 0.5 };
+
+/**
+ * 評判（本家の最新作に合わせて6段階）。内部は点（0〜100）で持ち、段階で見せる。最初は弱小
+ * 上がる：大会の成績・練習試合で同格以上に勝つ。下がる：年度の終わりに、その年に得た点が今の段階に見合わなければ少し下がる
+ * 名門を引きずり下ろす特別な仕組みは入れない
+ */
+export const REPUTATION = {
+  ranks: ['弱小', 'そこそこ', '中堅', '強豪', '名門', '超名門'],
+  /** 段階が上がる点 */
+  at: [0, 12, 26, 42, 60, 80],
+  max: 100,
+  gain: { prelimWin: 1, qualify: 4, nationalEntry: 3, nationalWin: 2, nationalChampion: 6, practiceWin: 0.3 },
+  /** 段階ごとの、1年で見合う点。足りない分 × fall だけ年度の終わりに下がる */
+  expected: [0, 4, 7, 11, 16, 22],
+  fall: 0.5,
+  /** 部費（年度の初めに入る） */
+  budget: [100000, 130000, 170000, 220000, 300000, 400000],
+  /** 新入生の人数と能力の平均 */
+  newcomers: [
+    { min: 4, max: 6, avg: 33 },
+    { min: 4, max: 7, avg: 35 },
+    { min: 5, max: 7, avg: 36 },
+    { min: 5, max: 8, avg: 38 },
+    { min: 6, max: 8, avg: 40 },
+    { min: 6, max: 8, avg: 42 },
+  ],
+  /** 相手校の評判：強さがこの値以上で、その段階 */
+  schoolAt: [0, 42, 48, 54, 60, 66],
+};
+
+/**
+ * 監督特能の獲得・失効（spec「監督特能」）。3つまで持てる。取ってから years 年で失効し、取り直すと期限が延びる。
+ * 獲得の場ごとの確率に、評判の段階の倍率（rankMul）を掛ける。勝負師は出にくい（weights）
+ */
+export const MANAGER_GAIN = {
+  max: 3,
+  years: 3,
+  chance: { seminar: 0.085, ob: 0.085, coach: 0.021, cup: 0.18 },
+  rankMul: [1, 1.3, 1.6, 1.9, 2.3, 2.6],
+  /** 覚える特能の出やすさ（書いていないものは1） */
+  weights: { shoubushi: 0.15 } as Record<string, number>,
+  /** 研修会パネル・OBパネルの盤面での重み（OBパネルは卒業生がいる年だけ） */
+  panel: { seminar: 2, ob: 2 },
+};

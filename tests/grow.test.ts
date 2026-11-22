@@ -77,7 +77,8 @@ describe('双六の進行', () => {
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(true);
       while (s.pending) s.choose(0);
-      while (s.pendingMatch) s.playMatch();
+      if (s.skillOffer) s.answerSkill(null);
+      while (s.pendingMatch) { s.playMatch(); if (s.skillOffer) s.answerSkill(null); }
     }
   });
 
@@ -99,7 +100,8 @@ describe('双六の進行', () => {
       while (s.day < target) {
         finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
-        while (s.pendingMatch) s.playMatch();
+        if (s.skillOffer) s.answerSkill(null);
+        while (s.pendingMatch) { s.playMatch(); if (s.skillOffer) s.answerSkill(null); }
       }
       if (s.day > target) {
         passed = true;
@@ -113,8 +115,9 @@ describe('双六の進行', () => {
     const s = new Season({ seed: 5, squad: squad(), events: [] });
     let asked = false;
     for (let i = 0; i < 200 && !asked && !s.over; i++) {
-      while (s.pendingMatch) s.playMatch();
+      while (s.pendingMatch) { s.playMatch(); if (s.skillOffer) s.answerSkill(null); }
       while (s.pending) s.choose(0);
+      if (s.skillOffer) s.answerSkill(null);
       if (s.matchChoices) s.chooseMatch(0);
       if (s.matchInvite) s.answerInvite(false);
       let r = s.useCard(s.firstUsable());
@@ -211,7 +214,8 @@ describe('イベントの仕組み', () => {
       while (s.day < indexOf(4, 7)) {
         finishStep(s, s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
-        while (s.pendingMatch) s.playMatch();
+        if (s.skillOffer) s.answerSkill(null);
+        while (s.pendingMatch) { s.playMatch(); if (s.skillOffer) s.answerSkill(null); }
       }
       if (s.day === indexOf(4, 7)) { landed = true; expect(s.flags.entered).toBe(true); }
     }

@@ -1,7 +1,8 @@
 // 育成全体（何年も続く）。1年分の双六は Season。年度の切り替えで、部員・お金・機材・方針・印・卒業生の名簿を引き継ぐ。
 // セーブは第3段階で。描画は知らない。
 
-import { ENERGY, MONEY, SCHOOLS } from './constants';
+import { ENERGY, REPUTATION, SCHOOLS } from './constants';
+import { closeReputation, expireSkills, rankOf, type OwnedSkill, type Reputation } from './reputation';
 import { makePrefecture, type School } from './school';
 import { Rng } from '../sim/rng';
 import type { TeamPolicy } from './cards';
@@ -28,6 +29,12 @@ export class Career {
   readonly schools: School[];
   /** 年度ごとの大会の成績（自チーム） */
   history: { year: number; tournament: string; text: string; wins: number }[] = [];
+  /** 評判（最初は弱小） */
+  readonly reputation: Reputation = { points: 0 };
+  /** 持っている監督特能（3つまで。期限つき） */
+  readonly managerSkills: OwnedSkill[] = [];
+  /** 前の年度の終わりに失効した監督特能（仮の画面で知らせる） */
+  expired: string[] = [];
   private o: CareerOptions;
 
   constructor(o: CareerOptions) {
@@ -35,7 +42,7 @@ export class Career {
     this.seed = o.seed;
     this.gender = o.gender ?? 'male';
     this.schools = makePrefecture(o.seed);
-    this.season = new Season({ seed: this.seedOf(1), squad: o.squad, year: 1, gender: this.gender, events: o.events, onPractice: o.onPractice, schools: this.schools });
+    this.season = new Season({ seed: this.seedOf(1), squad: o.squad, year: 1, gender: this.gender, events: o.events, onPractice: o.onPractice, schools: this.schools, reputation: this.reputation, managerSkills: this.managerSkills });
   }
 
   get year(): number {
@@ -50,7 +57,7 @@ export class Career {
     return this.seed * 1009 + year;
   }
 
-  /** 次の年度へ（3月31日まで進んでから）。部費が入り、盤面を作り直し、全員の体力が戻る */
+  /** 次の年度へ（3月31日まで進んでから）。評判が成績で下がることがあり、監督特能の期限が切れる。部費（評判で決まる）が入り、盤面を作り直し、全員の体力が戻る */
   nextYear(): Season {
     const s = this.season;
     if (!s.over) throw new Error('まだ年度の途中です');
@@ -58,10 +65,13 @@ export class Career {
     this.closeYear(s);
     for (const p of s.squad.players) p.energy = ENERGY.max;
     const year = s.year + 1;
+    closeReputation(this.reputation, s.repGained);
+    this.expired = expireSkills(this.managerSkills, year);
     this.season = new Season({
       seed: this.seedOf(year), squad: s.squad, year, gender: this.gender,
-      policy: s.policy as TeamPolicy, money: s.money + MONEY.budget, equipment: s.equipment, flags: s.flags,
+      policy: s.policy as TeamPolicy, money: s.money + REPUTATION.budget[rankOf(this.reputation.points)], equipment: s.equipment, flags: s.flags,
       events: this.o.events, onPractice: this.o.onPractice, schools: this.schools,
+      reputation: this.reputation, managerSkills: this.managerSkills, hasOB: this.graduates.length > 0,
     });
     return this.season;
   }

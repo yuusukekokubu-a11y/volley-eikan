@@ -8,12 +8,14 @@ import { Rng } from '../sim/rng';
 import type { Gender, Player, Role, Squad, TrainKey } from '../sim/types';
 import { gradeOf } from '../sim/player';
 import { TRAITS } from '../sim/traits';
+import { MANAGER_SKILLS } from '../sim/manager';
 import { campOf, dateOf, indexOf, makeBoard, weekdayOf, type BoardDay, type Panel } from './board';
 import { drawCard, PRACTICE, type Card, type PracticeDef, type TeamPolicy } from './cards';
-import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, SCHOOLS, TOURNAMENTS, YELLOW_BONUS, type TournamentDef } from './constants';
+import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, SCHOOLS, TOURNAMENTS, REPUTATION, YELLOW_BONUS, type TournamentDef } from './constants';
 import { autoLineup, autoRegister, checkRegistration, makeNationals, makePrefecture, makeSchoolPlayers, randomTactics, teamStrength, type School } from './school';
 import { Tournament, type BoutSim, type Entry } from './tournament';
 import { applyMatchExp, outcomeOf, runMatch, setCount, type MatchOutcome } from './matchplay';
+import { addReputation, learnSkill, rankOf, rollSkill, type OwnedSkill, type Reputation, type SkillSource } from './reputation';
 import type { MatchOptions } from '../sim/game';
 import { SURNAMES } from './names';
 import { fill, TEXTS, type Message } from './texts';
@@ -41,6 +43,12 @@ export interface SeasonOptions {
   onPractice?: PracticeHook;
   /** 県内の学校（育成全体で持つ。省くと seed から作る） */
   schools?: School[];
+  /** 評判（育成全体で持つ。省くと弱小から） */
+  reputation?: Reputation;
+  /** 持っている監督特能（育成全体で持つ） */
+  managerSkills?: OwnedSkill[];
+  /** 卒業生がいる（OBパネルを置く） */
+  hasOB?: boolean;
 }
 
 /** 試合を待っている（大会の1試合・練習試合）。playMatch（結果だけ）か、試合画面で行って finishMatch で続ける */
@@ -53,7 +61,17 @@ export interface PendingMatch {
   bestOf: 3 | 5;
   /** 登録の人数の決まりがある（大会） */
   limit: boolean;
+  /** 練習試合の相手の格（同格以上に勝つと評判が上がる） */
+  level?: MatchOpponent['level'];
 }
+
+/** 監督特能を覚えられるが、3つ持っているので入れ替えか見送りを選ぶ（answerSkill で続ける） */
+export interface SkillOffer {
+  id: string;
+  source: SkillSource;
+}
+
+const SOURCE_NAME: Record<SkillSource, string> = { seminar: '研修会', ob: 'OB', coach: '他校の監督', cup: '大会の実績' };
 
 /** 試合の画面に渡すもの（自チーム＝A） */
 export interface MatchSetup {
@@ -98,6 +116,8 @@ export interface StepResult {
   matchInvite?: MatchOpponent;
   /** 練習試合の日に止まった（試合とつなぐのは第3段階） */
   match?: ScheduledMatch;
+  /** 監督特能の入れ替えか見送りを待っている（answerSkill で続ける） */
+  skillOffer?: SkillOffer;
   /** 出来事の一言（仮の画面に出す） */
   notes: string[];
   /** 見せる文章（マネージャーの台詞など。仮の画面では順に出す） */
@@ -167,6 +187,14 @@ export class Season {
   tournamentDay: number | null = null;
   /** 試合を待っている */
   pendingMatch: PendingMatch | null = null;
+  /** 評判（育成全体と共有） */
+  readonly reputation: Reputation;
+  /** 持っている監督特能（育成全体と共有） */
+  readonly managerSkills: OwnedSkill[];
+  /** この年度に得た評判の点（年度の終わりの下がり方に使う） */
+  repGained = 0;
+  /** 監督特能の入れ替えか見送りを待っている */
+  skillOffer: SkillOffer | null = null;
   /** 予定している練習試合（1つまで） */
   scheduledMatch: ScheduledMatch | null = null;
   /** 申し込みカードを使って、相手を選ぶのを待っている3校 */
@@ -175,14 +203,16 @@ export class Season {
   matchInvite: MatchOpponent | null = null;
 
   constructor(o: SeasonOptions) {
-    this.board = makeBoard(o.seed);
+    this.board = makeBoard(o.seed, { ob: !!o.hasOB });
     this.year = o.year ?? 1;
     this.squad = o.squad;
     this.policy = o.policy ?? 'all';
     this.gender = o.gender ?? 'male';
     this.flags = o.flags ?? {};
     // 年度の初めに部費が入る（評判による増減は第3段階で）
-    this.money = o.money ?? MONEY.budget;
+    this.reputation = o.reputation ?? { points: 0 };
+    this.managerSkills = o.managerSkills ?? [];
+    this.money = o.money ?? REPUTATION.budget[rankOf(this.reputation.points)];
     this.equipment = [...(o.equipment ?? [])];
     this.events = o.events ?? EVENTS;
     this.rng = new Rng(o.seed * 131 + 17);
@@ -417,6 +447,7 @@ export class Season {
 
   private ready() {
     if (this.pendingMatch) throw new Error('試合をしてください');
+    if (this.skillOffer) throw new Error('監督特能を入れ替えるか見送るかを選んでください');
     if (this.matchChoices) throw new Error('練習試合の相手を選んでください');
     if (this.matchInvite) throw new Error('練習試合の申し込みに返事をしてください');
     if (this.pending) throw new Error('イベントの選択肢を先に選んでください');
@@ -491,7 +522,7 @@ export class Season {
       this.scheduledMatch = null;
       notes.push(`練習試合：${match.opponent.name}`);
       const o = match.opponent;
-      this.pendingMatch = { kind: 'practice', title: '練習試合', opponent: { id: `pm-${this.day}`, name: o.name, strength: o.strength }, bestOf: 3, limit: false };
+      this.pendingMatch = { kind: 'practice', title: '練習試合', opponent: { id: `pm-${this.day}`, name: o.name, strength: o.strength }, bestOf: 3, limit: false, level: o.level };
       this.trigger({ fixed: match.via === 'manager' ? 'managerMatch' : 'practiceMatch' }, '', notes);
     }
     // 予選の次の回戦の日
@@ -507,6 +538,7 @@ export class Season {
       moved, panel, event: event ?? undefined, notes,
       ...(this.practiceOpen ? { practiceOpen: true } : {}),
       ...(this.matchInvite ? { matchInvite: this.matchInvite } : {}),
+      ...(this.skillOffer ? { skillOffer: this.skillOffer } : {}),
       ...(match ? { match } : {}),
     };
   }
@@ -536,6 +568,7 @@ export class Season {
     const t = new Tournament(def, [own, ...others], rng, this.year);
     this.tournaments[id] = t;
     notes.push(`${def.name}が始まりました`);
+    if (def.kind === 'national') this.gainRep(REPUTATION.gain.nationalEntry, notes);
     this.nextBout(notes);
   }
 
@@ -596,9 +629,43 @@ export class Season {
     const opp = this.schoolTeam(pm.opponent, `${pm.title}-${this.day}-opp`);
     const starters = [...own.team.rotation.map(s => s.player.id), ...(own.team.libero ? [own.team.libero.id] : [])];
     return {
-      options: { gender: this.gender, bestOf: pm.bestOf, seed: hashSeed(`${pm.title}-${this.year}-${this.day}`), teams: { A: own.team, B: opp.team }, bench: { A: own.bench, B: opp.bench } },
+      options: { managerSkills: this.managerSkills.map(x => x.id), gender: this.gender, bestOf: pm.bestOf, seed: hashSeed(`${pm.title}-${this.year}-${this.day}`), teams: { A: own.team, B: opp.team }, bench: { A: own.bench, B: opp.bench } },
       starters, registered,
     };
+  }
+
+  /** 評判が上がる */
+  private gainRep(v: number, notes: string[]) {
+    addReputation(this.reputation, v);
+    this.repGained += v;
+    notes.push(`評判 +${v}`);
+  }
+
+  /** 監督特能の獲得の機会（確率は獲得の場と評判で決まる） */
+  private trySkill(source: SkillSource, notes: string[]) {
+    const id = rollSkill(this.rng, source, this.reputation.points);
+    if (!id) return;
+    const name = MANAGER_SKILLS[id].name;
+    if (learnSkill(this.managerSkills, id, this.year)) {
+      notes.push(`${SOURCE_NAME[source]}：監督特能「${name}」を覚えた`);
+      this.say(`監督特能「${name}」を覚えた（${SOURCE_NAME[source]}）`);
+    } else {
+      this.skillOffer = { id, source };
+      notes.push(`${SOURCE_NAME[source]}：監督特能「${name}」を覚えられる（3つ持っているので入れ替えるか見送るかを選ぶ）`);
+    }
+  }
+
+  /** 3つ持っている時：replaceId と入れ替える（null なら見送る） */
+  answerSkill(replaceId: string | null): Message | null {
+    const offer = this.skillOffer;
+    if (!offer) throw new Error('監督特能の入れ替えは待っていません');
+    this.skillOffer = null;
+    if (!replaceId) return null;
+    const i = this.managerSkills.findIndex(x => x.id === replaceId);
+    if (i < 0) throw new Error('その監督特能は持っていません');
+    this.managerSkills.splice(i, 1);
+    learnSkill(this.managerSkills, offer.id, this.year);
+    return { text: `監督特能「${MANAGER_SKILLS[replaceId].name}」を「${MANAGER_SKILLS[offer.id].name}」に入れ替えた` };
   }
 
   /** 結果だけ：試合を全部おまかせで計算して、結果を入れる */
@@ -618,9 +685,13 @@ export class Season {
     notes.push(`${pm.title}：${pm.opponent.name}に${setCount(o.sets, false)}で${o.win ? '勝ち' : '負け'}`);
     if (pm.kind === 'practice') {
       if (o.win) notes.push(`報奨 ${this.rewardWin('practice').toLocaleString()}円`);
+      if (o.win && pm.level !== 'below') this.gainRep(REPUTATION.gain.practiceWin, notes);
+      // 練習試合の後：他校の監督から教わることがある
+      this.trySkill('coach', notes);
     } else {
       const t = this.tournaments[pm.tournamentId!]!;
       if (o.win) notes.push(`報奨 ${this.rewardWin('tournament', t.round + 1).toLocaleString()}円`);
+      if (o.win) this.gainRep(t.def.kind === 'prelim' ? REPUTATION.gain.prelimWin : REPUTATION.gain.nationalWin, notes);
       this.afterBout(t, o.win, setCount(o.sets), notes);
     }
     return { moved: 0, notes, ...this.drain() };
@@ -639,6 +710,13 @@ export class Season {
       if (t.over && t.ownAlive && t.def.next) {
         this.qualified[t.def.next] = true;
         notes.push(`${TOURNAMENTS[t.def.next].name}に出場します`);
+        this.gainRep(REPUTATION.gain.qualify, notes);
+        this.trySkill('cup', notes);
+      }
+      if (t.def.kind === 'national') {
+        if (t.over && t.ownAlive) this.gainRep(REPUTATION.gain.nationalChampion, notes);
+        // 本戦でベスト4以上：大会の実績で監督特能を覚えることがある
+        if (res.wins >= 3) this.trySkill('cup', notes);
       }
       return;
     }
@@ -726,6 +804,11 @@ export class Season {
           notes.push(`黄：${practice.name}の経験値が増えた`);
         }
         return null;
+      case 'seminar':
+      case 'ob':
+        notes.push(panel.kind === 'seminar' ? '研修会パネル' : 'OBパネル');
+        this.trySkill(panel.kind, notes);
+        return null;
       case 'branch':
         return null;
       case 'fixed': {
@@ -758,7 +841,7 @@ export class Season {
   private rosterEvent(id: string, notes: string[]): boolean {
     if (!['entrance', 'physical', 'retire', 'campSummer', 'campWinter', 'graduation'].includes(id)) return false;
     if (id === 'entrance') {
-      this.newcomers = enroll(this.squad, this.year, this.gender, this.rng);
+      this.newcomers = enroll(this.squad, this.year, this.gender, this.rng, REPUTATION.newcomers[rankOf(this.reputation.points)]);
       notes.push(`新入生が${this.newcomers.length}人入部しました`);
     } else if (id === 'physical') {
       this.measured = measure(this.squad, this.year);

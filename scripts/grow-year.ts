@@ -41,7 +41,8 @@ function run(focus: boolean, buy: boolean): Result {
       const avg = sq.players.reduce((a, p) => a + p.energy, 0) / sq.players.length;
       finishStep(s, avg < 45 ? (r.rests++, s.rest()) : s.useCard(s.firstUsable()));
       while (s.pending) s.choose(0);
-      while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); }
+      if (s.skillOffer) s.answerSkill(null);
+      while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); if (s.skillOffer) s.answerSkill(null); }
       if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
       for (const p of sq.players) r.cond[p.condition + 2]++;

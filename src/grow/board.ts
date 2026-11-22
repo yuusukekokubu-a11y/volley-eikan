@@ -2,9 +2,9 @@
 // ルート分岐：分かれ道のパネルの次の数日は2つの道に分かれ、どちらを通るかを選ぶ（終わるとまた1本に戻る）。
 
 import { Rng } from '../sim/rng';
-import { BRANCH, CAMP, DAYS_IN_YEAR, FIRST_WEEKDAY, FIXED_EVENTS, PANEL_WEIGHTS, YEAR_START } from './constants';
+import { BRANCH, CAMP, MANAGER_GAIN, DAYS_IN_YEAR, FIRST_WEEKDAY, FIXED_EVENTS, PANEL_WEIGHTS, YEAR_START } from './constants';
 
-export type PanelKind = 'blue' | 'red' | 'white' | 'green' | 'yellow' | 'training' | 'branch' | 'fixed';
+export type PanelKind = 'blue' | 'red' | 'white' | 'green' | 'yellow' | 'training' | 'seminar' | 'ob' | 'branch' | 'fixed';
 
 export interface Panel {
   kind: PanelKind;
@@ -58,14 +58,16 @@ export function campOf(index: number): 'summer' | 'winter' | null {
 }
 
 /** 色のパネル。合宿の日には緑パネルを置かない */
-function colorPanel(rng: Rng, noGreen = false): Panel {
-  const w = PANEL_WEIGHTS.default;
+function colorPanel(rng: Rng, noGreen = false, ob = false): Panel {
+  // 研修会パネルはいつも、OBパネルは卒業生がいる年だけ
+  const w: Partial<Record<PanelKind, number>> = { ...PANEL_WEIGHTS.default, seminar: MANAGER_GAIN.panel.seminar, ...(ob ? { ob: MANAGER_GAIN.panel.ob } : {}) };
   const kind = rng.weighted(Object.entries(w).filter(([k]) => !(noGreen && k === 'green')).map(([k, v]) => ({ item: k as PanelKind, w: v! })))!;
   return { kind };
 }
 
-/** 1年分の盤面を作る */
-export function makeBoard(seed: number): BoardDay[] {
+/** 1年分の盤面。ob：OBパネルを置く（卒業生がいる年） */
+export function makeBoard(seed: number, opts: { ob?: boolean } = {}): BoardDay[] {
+  const ob = !!opts.ob;
   const rng = new Rng(seed * 97 + 5);
   const fixed = new Map(FIXED_EVENTS.map(f => [indexOf(f.month, f.day), f.id]));
   const days: BoardDay[] = [];
@@ -80,7 +82,7 @@ export function makeBoard(seed: number): BoardDay[] {
       continue;
     }
     if (branchLeft > 0) {
-      days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i)), colorPanel(rng, !!campOf(i))] });
+      days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i), ob), colorPanel(rng, !!campOf(i), ob)] });
       branchLeft--;
       continue;
     }
@@ -90,7 +92,7 @@ export function makeBoard(seed: number): BoardDay[] {
       branchLeft = BRANCH.minDays + Math.floor(rng.range(0, BRANCH.maxDays - BRANCH.minDays + 1));
       continue;
     }
-    days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i))] });
+    days.push({ index: i, month, day, lanes: [colorPanel(rng, !!campOf(i), ob)] });
   }
   return days;
 }

@@ -4,7 +4,7 @@
 import { ROSTER } from './constants';
 import { gradeOf, ROLES, rollHeightPotential } from '../sim/player';
 import type { Rng } from '../sim/rng';
-import { makePlayer } from '../sim/sample';
+import { makePlayer, ROLE_BONUS } from '../sim/sample';
 import { TRAITS } from '../sim/traits';
 import type { Gender, Player, Role, Squad, TrainKey } from '../sim/types';
 import { SURNAMES } from './names';
@@ -70,15 +70,19 @@ function pickName(squad: Squad, rng: Rng): string {
 }
 
 /** 新入生を1人作る */
-export function makeNewcomer(rng: Rng, squad: Squad, year: number, gender: Gender, serial: number): Player {
+export function makeNewcomer(rng: Rng, squad: Squad, year: number, gender: Gender, serial: number, avg: number = ROSTER.newcomerAvg): Player {
   const role = rng.weighted(ROLES.map(r => ({ item: r, w: ROSTER.roleWeights[r] })))!;
   // 選手を見分ける番号は部員の中でかぶらないようにする
   let id = `y${year}-${serial}`;
   for (let k = 2; squad.players.some(x => x.id === id); k++) id = `y${year}-${serial}-${k}`;
-  const p = makePlayer(rng, id, freeNumber(squad), role, gender, ROSTER.newcomerAvg);
+  const p = makePlayer(rng, id, freeNumber(squad), role, gender, avg);
   // 試作用の作り方から、新入生の決まりに合わせて直す
   const spread = ROSTER.newcomerSpread;
-  for (const k of KEYS) p[k] = Math.round(Math.min(99, Math.max(1, ROSTER.newcomerAvg + (p[k] - ROSTER.newcomerAvg) * spread / 10)));
+  // ばらつきを小さくするのはランダムな部分だけ。ポジションの得意（ROLE_BONUS）は縮めない
+  for (const k of KEYS) {
+    const b = ROLE_BONUS[role][k] ?? 0;
+    p[k] = Math.round(Math.min(99, Math.max(1, avg + (p[k] - b - avg) * spread / 10 + b)));
+  }
   p.name = pickName(squad, rng);
   p.enrollYear = year;
   p.heightPotential = rollHeightPotential(rng, gender);
@@ -93,12 +97,12 @@ export function makeNewcomer(rng: Rng, squad: Squad, year: number, gender: Gende
   return p;
 }
 
-/** 入学式：新入生が入部する（人数は毎年ランダム）。入った選手を返す */
-export function enroll(squad: Squad, year: number, gender: Gender, rng: Rng): Player[] {
-  const n = ROSTER.newcomers.min + Math.floor(rng.range(0, ROSTER.newcomers.max - ROSTER.newcomers.min + 1));
+/** 入学式：新入生が入部する（人数は毎年ランダム。人数の幅と能力の平均は評判で決まる）。入った選手を返す */
+export function enroll(squad: Squad, year: number, gender: Gender, rng: Rng, quality: { min: number; max: number; avg: number } = { ...ROSTER.newcomers, avg: ROSTER.newcomerAvg }): Player[] {
+  const n = quality.min + Math.floor(rng.range(0, quality.max - quality.min + 1));
   const out: Player[] = [];
-  for (let i = 0; i < Math.min(n, ROSTER.newcomers.max); i++) {
-    const p = makeNewcomer(rng, squad, year, gender, i + 1);
+  for (let i = 0; i < Math.min(n, quality.max); i++) {
+    const p = makeNewcomer(rng, squad, year, gender, i + 1, quality.avg);
     squad.players.push(p);
     out.push(p);
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { drawCard, PRACTICE } from '../src/grow/cards';
-import { MONEY } from '../src/grow/constants';
+import { MONEY, REPUTATION } from '../src/grow/constants';
 import { applyPractice, dailyCondition, gymLevel, gymMul, practiceGain } from '../src/grow/practice';
 import { Season } from '../src/grow/season';
 import { Rng } from '../src/sim/rng';
@@ -86,9 +86,11 @@ describe('練習', () => {
     const t = makeTeam(1, 'A', 'male', 55);
     const squad: Squad = { players: [...t.rotation.map(s => s.player), t.libero!, ...makeBench(1, 'A', 'male', 55)], captainId: null };
     const s = new Season({ seed: 1, squad, events: [] });
-    expect(s.money).toBe(MONEY.budget);
+    // 部費は評判で決まる（最初は弱小）
+    expect(s.money).toBe(REPUTATION.budget[0]);
+    s.money = 200000;
     s.buy('barbell');
-    expect(s.money).toBe(MONEY.budget - MONEY.price.advanced);
+    expect(s.money).toBe(200000 - MONEY.price.advanced);
     expect(s.gym).toBe(3);
     expect(() => s.buy('barbell')).toThrow();
     s.money = 0;

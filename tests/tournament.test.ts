@@ -28,11 +28,14 @@ function until(s: Season, done: () => boolean) {
   let guard = 0;
   while (!done() && !s.over && guard++ < 1500) {
     if (s.pendingMatch) { s.playMatch(); continue; }
+    if (s.skillOffer) { s.answerSkill(null); continue; }
     while (s.pending) s.choose(0);
+    if (s.skillOffer) s.answerSkill(null);
     if (s.matchChoices) { s.chooseMatch(0); continue; }
     if (s.matchInvite) { s.answerInvite(false); continue; }
     finishStep(s, s.useCard(s.firstUsable()));
     while (s.pending) s.choose(0);
+    if (s.skillOffer) s.answerSkill(null);
   }
 }
 

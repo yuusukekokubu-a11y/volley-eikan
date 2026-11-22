@@ -6,7 +6,8 @@
 
 import { Career } from '../src/grow/career';
 import { EQUIPMENT } from '../src/grow/practice';
-import { MONEY, ROUND_NAMES } from '../src/grow/constants';
+import { MONEY, REPUTATION, ROUND_NAMES } from '../src/grow/constants';
+import { rankOf } from '../src/grow/reputation';
 import { enroll } from '../src/grow/roster';
 import { finishStep } from '../src/grow/season';
 import { Rng } from '../src/sim/rng';
@@ -24,8 +25,8 @@ function startSquad(seed: number): Squad {
   return sq;
 }
 
-interface YearRow { strength: number[]; prefTop: number[]; prelim: number[]; qualified: number; national: number[]; nationals: number; practice: [number, number] }
-const rows: YearRow[] = Array.from({ length: YEARS }, () => ({ strength: [], prefTop: [], prelim: [], qualified: 0, national: [], nationals: 0, practice: [0, 0] }));
+interface YearRow { rep: number[]; skills: number[]; strength: number[]; prefTop: number[]; prelim: number[]; qualified: number; national: number[]; nationals: number; practice: [number, number] }
+const rows: YearRow[] = Array.from({ length: YEARS }, () => ({ rep: [], skills: [], strength: [], prefTop: [], prelim: [], qualified: 0, national: [], nationals: 0, practice: [0, 0] }));
 const t0 = Date.now();
 
 for (let seed = 1; seed <= SEEDS; seed++) {
@@ -41,8 +42,9 @@ for (let seed = 1; seed <= SEEDS; seed++) {
       if (s.practiceOpen) for (const p of s.squad.players) if (!p.retired && p.practice.focus === 'auto') s.setPractice(p.id, { focus: FOCUS[p.practice.position] });
       const avg = s.squad.players.reduce((a, p) => a + p.energy, 0) / Math.max(1, s.squad.players.length);
       finishStep(s, avg < 45 ? s.rest() : s.useCard(s.firstUsable()));
-      for (let k = 0; k < 20 && (s.pending || s.pendingMatch || s.matchChoices || s.matchInvite); k++) {
+      for (let k = 0; k < 20 && (s.pending || s.pendingMatch || s.matchChoices || s.matchInvite || s.skillOffer); k++) {
         while (s.pending) s.choose(0);
+        if (s.skillOffer) s.answerSkill(null);
         if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
         while (s.pendingMatch) {
@@ -54,6 +56,8 @@ for (let seed = 1; seed <= SEEDS; seed++) {
     }
     const row = rows[y];
     row.strength.push(s.ownStrength());
+    row.rep.push(c.reputation.points);
+    row.skills.push(c.managerSkills.length);
     row.prefTop.push(Math.max(...c.schools.map(x => x.strength)));
     for (const id of ['interhighPrelim', 'harukouPrelim'] as const) {
       const t = s.tournaments[id];
@@ -76,7 +80,7 @@ const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.lengt
 const reach = (wins: number[]) => ROUND_NAMES.map((n, i) => `${n}${Math.round(100 * wins.filter(w => w >= i).length / Math.max(1, wins.length))}%`).join('・');
 console.log(`== ${SEEDS}チーム × ${YEARS}年（予選は32校、本戦は32校。予選は年2回）`);
 rows.forEach((r, y) => {
-  console.log(`${y + 1}年目：自チームの強さ ${mean(r.strength).toFixed(1)}（県内1位の学校 ${mean(r.prefTop).toFixed(1)}）`);
+  console.log(`${y + 1}年目：自チームの強さ ${mean(r.strength).toFixed(1)}（県内1位の学校 ${mean(r.prefTop).toFixed(1)}）、年度の終わりの評判 ${mean(r.rep).toFixed(1)}点（${REPUTATION.ranks.map((n, i) => [n, r.rep.filter(p => rankOf(p) === i).length] as [string, number]).filter(([, k]) => k).map(([n, k]) => `${n}${Math.round(100 * k / r.rep.length)}%`).join('・')}）、監督特能 ${mean(r.skills).toFixed(1)}個`);
   console.log(`  予選：各回戦に進んだ割合 ${reach(r.prelim)}、優勝（本戦へ） ${Math.round(100 * r.qualified / Math.max(1, r.prelim.length))}%`);
   if (r.nationals) console.log(`  本戦（${r.nationals}回出場）：各回戦に進んだ割合 ${reach(r.national)}、優勝 ${Math.round(100 * r.national.filter(w => w === 5).length / r.nationals)}%`);
   else console.log('  本戦：出場なし');

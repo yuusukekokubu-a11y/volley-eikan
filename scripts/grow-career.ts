@@ -55,7 +55,8 @@ function run(focus: boolean, buy: boolean) {
         const avg = s.squad.players.reduce((a, p) => a + p.energy, 0) / Math.max(1, s.squad.players.length);
         finishStep(s, avg < 45 ? s.rest() : s.useCard(s.firstUsable()));
         while (s.pending) s.choose(0);
-        while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); }
+        if (s.skillOffer) s.answerSkill(null);
+        while (s.pendingMatch) { s.playMatch(); while (s.pending) s.choose(0); if (s.skillOffer) s.answerSkill(null); }
         if (s.matchChoices) s.chooseMatch(0);
         if (s.matchInvite) s.answerInvite(true);
         if (s.date.month === 3 && s.date.day === 31) break;
