@@ -4,6 +4,7 @@
 
 import { SCHOOLS, SQUAD_LIMIT } from './constants';
 import { bestRole } from './roster';
+import { SURNAMES } from './names';
 import { makePlayer } from '../sim/sample';
 import { Rng } from '../sim/rng';
 import { TRAITS } from '../sim/traits';
@@ -51,7 +52,8 @@ export function makeNationals(rng: Rng, n: number, used: Set<string>): School[] 
 export function makeSchoolPlayers(school: { id: string; strength: number }, gender: Gender, seed: number, year: number): Player[] {
   const rng = new Rng(seed);
   const roles: Role[] = ['S', 'OH', 'MB', 'OP', 'OH', 'MB', 'L', 'S', 'OH', 'MB', 'OH', 'L'];
-  return roles.slice(0, SQUAD_LIMIT.size).map((role, i) => {
+  const out: Player[] = [];
+  roles.slice(0, SQUAD_LIMIT.size).forEach((role, i) => {
     // 控えほど少し弱い
     const avg = school.strength - (i >= 7 ? SCHOOLS.benchGap : 0);
     const p = makePlayer(rng, `${school.id}-${i + 1}`, i + 1, role, gender, avg);
@@ -59,7 +61,11 @@ export function makeSchoolPlayers(school: { id: string; strength: number }, gend
     const target = avg + rng.normal() * SCHOOLS.playerSpread;
     const shift = target - KEYS.reduce((x, k) => x + p[k], 0) / KEYS.length;
     for (const k of KEYS) p[k] = Math.round(Math.max(1, Math.min(99, p[k] + shift)));
-    p.name = `${school.id}-${i + 1}`;
+    // 名前は新入生と同じ名字の一覧から（チームの中でかぶらないもの優先）
+    const names = new Set(out.map(x => x.name));
+    let name = rng.pick(SURNAMES);
+    for (let k = 0; k < 20 && names.has(name); k++) name = rng.pick(SURNAMES);
+    p.name = name;
     p.enrollYear = year - Math.min(2, Math.floor(rng.range(0, 3)));
     // 特能：強い学校ほど青が多い（サーブの解禁特能は makePlayer のまま）
     const blue = Object.values(TRAITS).filter(t => t.kind === 'stat' && t.color === 'blue' && !t.upgradeOf && !t.alsoUnlocks && (!t.roles || t.roles.includes(role)));
@@ -70,8 +76,9 @@ export function makeSchoolPlayers(school: { id: string; strength: number }, gend
       if (!p.traits.includes(t.id)) p.traits.push(t.id);
     }
     if (red.length && rng.chance(SCHOOLS.redChance)) p.traits.push(rng.pick(red).id);
-    return p;
+    out.push(p);
   });
+  return out;
 }
 
 /** 作戦（相手校はランダム） */
