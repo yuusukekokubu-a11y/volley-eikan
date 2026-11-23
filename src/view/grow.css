@@ -66,3 +66,6 @@ table#squad { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bracket .own { color: #ffd35a; font-weight: 800; }
 .bracket .lost { opacity: 0.45; }
 #modalBox textarea { width: 100%; background: #1d2733; color: var(--text); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; }
+.tr { display: inline-block; padding: 1px 5px; margin: 1px 2px; border-radius: 5px; font-size: 11px; background: rgba(255,255,255,0.12); }
+.tr.blue { background: #2f63c9; } .tr.red { background: #b33a3a; } .tr.gold { background: #b8902a; } .tr.style { background: #2f8a4f; } .tr.unlock { background: #5a5f6a; }
+td.traits { white-space: normal; min-width: 120px; }

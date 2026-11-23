@@ -3,11 +3,13 @@
 
 import { FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
-import { abilityRank } from './common';
+import { abilityRank, APT_MARK } from './common';
+import { TRAITS } from '../sim/traits';
+import { REPUTATION } from '../grow/constants';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
 import { clearSave, exportSave, importSave, loadFrom, saveTo, type Store } from '../grow/save';
-import { SURNAMES } from '../grow/names';
+import { enroll } from '../grow/roster';
 import type { MatchOpponent, StepResult } from '../grow/season';
 import type { MatchOutcome } from '../grow/matchplay';
 import { isLibero } from '../grow/school';
@@ -19,7 +21,6 @@ import { fill, TEXTS, type Message } from '../grow/texts';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
 import { gradeOf } from '../sim/player';
-import { makeBench, makeTeam } from '../sim/sample';
 import type { Player, Role, Squad, TrainKey } from '../sim/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -32,13 +33,13 @@ const PANEL_NAME: Record<Panel['kind'], string> = {
 };
 const ABILITY_NAME: Record<string, string> = { jump: '跳躍', power: 'パワー', speed: 'スピード', technique: 'テクニック', block: 'ブロック', stamina: 'スタミナ' };
 
+/** 最初の部員：新入生の仕組みで2・3年生を作る（評判は弱小から始まるので、弱小の新入生の決まりで） */
 function newSquad(): Squad {
-  const t = makeTeam(seed, 'A', 'male', 55);
-  const players = [...t.rotation.map(s => s.player), t.libero!, ...makeBench(seed, 'A', 'male', 55)];
-  // 試作用の部員にも名字を付ける
+  const sq: Squad = { players: [], captainId: null };
   const rng = new Rng(seed * 3 + 1);
-  for (const p of players) p.name = rng.pick(SURNAMES);
-  return { players, captainId: null };
+  enroll(sq, -1, 'male', rng, REPUTATION.newcomers[0]);
+  enroll(sq, 0, 'male', rng, REPUTATION.newcomers[0]);
+  return sq;
 }
 
 // ---------------- セーブ（枠は1つ。行動のたびに自動で保存） ----------------
@@ -78,7 +79,7 @@ function render() {
   const m = season.scheduledMatch;
   const WD = '日月火水木金土';
   $('money').textContent = `お金 ${season.money.toLocaleString()}円${m ? `　練習試合 ${season.board[m.day].month}/${season.board[m.day].day}（${WD[season.weekday(m.day)]}）` : ''}`;
-  $('gym').textContent = `体育館レベル ${season.gym}　評判 ${rankName(season.reputation.points)}（${Math.round(season.reputation.points)}点）　監督特能 ${season.managerSkills.map(x => `${MANAGER_SKILLS[x.id].name}（${x.until}年目まで）`).join('・') || 'なし'}`;
+  $('gym').textContent = `体育館Lv${season.gym}　評判 ${rankName(season.reputation.points)}　監督特能 ${season.managerSkills.map(x => MANAGER_SKILLS[x.id].name).join('・') || 'なし'}`;
   $('policy').innerHTML = (Object.keys(POLICY) as TeamPolicy[]).map(k =>
     `<button class="${season.policy === k ? 'on' : ''}" data-policy="${k}">${POLICY[k].name}</button>`).join('');
   for (const b of Array.from($('policy').querySelectorAll<HTMLButtonElement>('button'))) {
@@ -109,13 +110,17 @@ function render() {
     const ab = KEYS.map(k => `<td>${abilityRank(p[k])}${p[k]}</td>`).join('');
     const focus = p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus];
     const isNew = season.newcomers.includes(p) ? '（新）' : '';
-    return `<tr><td>${p.number}</td><td>${p.name}${isNew}</td><td>${p.height}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
+    const traits = p.traits.map(id => TRAITS[id]).filter(Boolean).map(t => `<span class="tr ${t!.kind === 'stat' ? t!.color : t!.kind}">${t!.name}</span>`).join('');
+    return `<tr><td>${p.number}</td><td><button class="small" data-pd="${p.id}">${p.name}${isNew}</button></td><td>${p.height}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
       <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}</td><td>${COND[p.condition + 2]}</td>
-      <td>${p.retired ? '引退' : `<button class="small" data-pr="${p.id}" ${season.practiceOpen ? '' : 'disabled'}>${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button>`}</td></tr>`;
+      <td>${p.retired ? '引退' : `<button class="small" data-pr="${p.id}" ${season.practiceOpen ? '' : 'disabled'}>${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button>`}</td><td class="traits">${traits || '－'}</td></tr>`;
   }).join('');
-  $('squad').innerHTML = `<tr><th>番</th><th>名前</th><th>身長</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th></tr>${rows}`;
+  $('squad').innerHTML = `<tr><th>番</th><th>名前</th><th>身長</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th><th>特能</th></tr>${rows}`;
   for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pr]'))) {
     b.onclick = () => openPractice(b.getAttribute('data-pr')!);
+  }
+  for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pd]'))) {
+    b.onclick = () => openPlayer(b.getAttribute('data-pd')!);
   }
   $('log').innerHTML = log.slice(-30).reverse().map(l => `<div>${l}</div>`).join('');
 }
@@ -234,6 +239,28 @@ function openEvent() {
     };
     $('choices').appendChild(b);
   });
+  $('modal').classList.remove('hidden');
+}
+
+/** 選手の詳細（仮）：適性・特能・通算成績など。作り込みは第4段階の共通部品で */
+function openPlayer(id: string) {
+  const p = season.squad.players.find(x => x.id === id)!;
+  const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
+  const apt = (Object.keys(ROLE_NAME) as Role[]).map(r => `${ROLE_NAME[r]} ${APT_MARK[p.aptitude[r]]}`).join('　');
+  const traits = p.traits.map(t => TRAITS[t]).filter(Boolean).map(t => {
+    const color = t!.kind === 'stat' ? ({ blue: '青', red: '赤', gold: '金', other: '' } as Record<string, string>)[t!.color] : t!.kind === 'style' ? '緑' : '解禁';
+    return `<div><span class="tr ${t!.kind === 'stat' ? t!.color : t!.kind}">${t!.name}</span> <small>${color}${t!.desc ? `：${t!.desc}` : ''}</small></div>`;
+  }).join('') || '－';
+  const st = p.stats;
+  $('modalBox').innerHTML = `<div class="text">${p.number}番 ${p.name}（${gradeOf(p, season.year)}年・${p.hand === 'left' ? '左利き' : '右利き'}・${p.height}cm）${p.retired ? '　引退' : ''}</div>
+    <div style="max-height:230px;overflow-y:auto;font-size:13px;line-height:1.7">
+      <div>能力：${KEYS.map(k => `${ABILITY_NAME[k]} ${abilityRank(p[k])}${p[k]}`).join('　')}</div>
+      <div>適性：${apt}</div>
+      <div>特能：</div>${traits}
+      <div>通算：${st.matches}試合・${st.sets}セット・スパイク得点 ${st.kills}・ブロック得点 ${st.blockPoints}・サービスエース ${st.aces}</div>
+    </div>
+    <div class="choices"><button id="close">閉じる</button></div>`;
+  ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
   $('modal').classList.remove('hidden');
 }
 
