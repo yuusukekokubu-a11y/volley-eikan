@@ -1,6 +1,6 @@
 // 32校のトーナメント（5回戦）。自チームの試合は外から結果を入れ、他校同士の試合は渡された計算（sim）で決める。描画は知らない。
 
-import { ROUND_NAMES, type TournamentDef } from './constants';
+import { ROUND_NAMES, TOURNAMENTS, type TournamentDef } from './constants';
 import type { Rng } from '../sim/rng';
 
 /** 出場校。own は自チーム */
@@ -25,6 +25,16 @@ export type BoutSim = (a: Entry, b: Entry, bestOf: 3 | 5, key: string) => { aWin
 
 /** シード校の位置（32の山で、強い順に1〜8番を離して置く） */
 const SEED_POS = [0, 31, 16, 15, 8, 23, 24, 7];
+
+/** セーブする形（大会の決まりは ID で持ち、読み戻す時に今の定義を使う） */
+export interface TournamentData {
+  defId: TournamentDef['id'];
+  entries: Entry[];
+  rounds: Bout[][];
+  round: number;
+  over: boolean;
+  year: number;
+}
 
 export class Tournament {
   readonly def: TournamentDef;
@@ -157,5 +167,15 @@ export class Tournament {
       out[id] = (out[id] ?? 0) + 1;
     }
     return out;
+  }
+
+  toData(): TournamentData {
+    return { defId: this.def.id, entries: this.entries, rounds: this.rounds, round: this.round, over: this.over, year: this.year };
+  }
+
+  static fromData(d: TournamentData): Tournament {
+    const t = Object.create(Tournament.prototype) as Tournament;
+    Object.assign(t, { def: TOURNAMENTS[d.defId], entries: d.entries, rounds: d.rounds, round: d.round, over: d.over, year: d.year });
+    return t;
   }
 }

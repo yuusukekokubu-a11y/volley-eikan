@@ -7,6 +7,15 @@ export class Rng {
     this.s = seed >>> 0;
   }
 
+  /** 乱数の状態（セーブ用。読み戻すと同じ続きになる） */
+  get state(): number {
+    return this.s;
+  }
+
+  set state(v: number) {
+    this.s = v >>> 0;
+  }
+
   /** 0以上1未満 */
   next(): number {
     // mulberry32

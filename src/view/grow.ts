@@ -6,6 +6,7 @@ import { EQUIPMENT } from '../grow/practice';
 import { abilityRank } from './common';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
+import { clearSave, exportSave, importSave, loadFrom, saveTo, type Store } from '../grow/save';
 import { SURNAMES } from '../grow/names';
 import type { MatchOpponent, StepResult } from '../grow/season';
 import type { MatchOutcome } from '../grow/matchplay';
@@ -40,8 +41,23 @@ function newSquad(): Squad {
   return { players, captainId: null };
 }
 
-let career = new Career({ seed, squad: newSquad() });
+// ---------------- セーブ（枠は1つ。行動のたびに自動で保存） ----------------
+
+/** ブラウザの保存領域。使えない環境（プライベートモードなど）では保存しないで続ける */
+const store: Store | null = (() => {
+  try { localStorage.setItem('volley-eikan-test', '1'); localStorage.removeItem('volley-eikan-test'); return localStorage; } catch { return null; }
+})();
+let saved: Career | null = null;
+try { saved = store ? loadFrom(store) : null; } catch { saved = null; }
+
+let career = saved ?? new Career({ seed, squad: newSquad() });
 let season = career.season;
+
+/** 自動で保存する（描画のたびに呼ぶ。試合を見ている途中は試合前の状態のまま） */
+function autosave() {
+  if (!store) return;
+  try { saveTo(store, career); } catch (e) { console.error('セーブできませんでした', e); }
+}
 const log: string[] = [];
 
 const bestRole = (p: Player): Role => (Object.entries(p.aptitude) as [Role, number][]).sort((a, b) => b[1] - a[1])[0][0];
@@ -56,6 +72,7 @@ function dayCol(d: BoardDay, here: boolean): string {
 }
 
 function render() {
+  autosave();
   const { month, day } = season.date;
   $('date').textContent = `${season.year}年目 ${month}月${day}日${season.over ? '（1年が終わりました。「次の年へ」で新しい年度に進みます）' : season.practiceOpen ? '（練習指示を変えられます）' : ''}`;
   const m = season.scheduledMatch;
@@ -70,7 +87,7 @@ function render() {
   // 今いるマスと、この先14日分
   $('road').innerHTML = dayCol(season.board[season.day], true) + season.ahead(14).map(d => dayCol(d, false)).join('');
   // 手札
-  const busy = !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused || !!season.pendingMatch || !!season.skillOffer;
+  const busy = season.needBranch || !!season.pending || season.over || !!season.matchChoices || !!season.matchInvite || season.paused || !!season.pendingMatch || !!season.skillOffer;
   ($('resume') as HTMLButtonElement).disabled = !season.paused;
   $('hand').innerHTML = '';
   season.hand.forEach((c, i) => {
@@ -176,7 +193,8 @@ function closeModal() {
 
 /** 待っているもの（イベント・試合）があれば、その画面を出す */
 function nextModal() {
-  if (season.pending) openEvent();
+  if (season.needBranch) openBranch();
+  else if (season.pending) openEvent();
   else if (season.matchChoices) openMatchChoices();
   else if (season.matchInvite) openInvite();
   else if (season.skillOffer) openSkillOffer();
@@ -372,11 +390,62 @@ function openGraduates() {
 };
 ($('rest') as HTMLButtonElement).onclick = () => after(season.rest());
 ($('resume') as HTMLButtonElement).onclick = () => after(season.resume());
-($('newYear') as HTMLButtonElement).onclick = () => {
-  seed++;
-  career = new Career({ seed, squad: newSquad() });
-  season = career.season;
-  log.length = 0;
-  render();
-};
+/** 最初から：今のセーブを消してよいかを確かめる */
+function startOver() {
+  $('modalBox').innerHTML = `<div class="text">最初から始めます。今のセーブは消えます。よいですか？</div>
+    <div class="choices"><button id="yes">最初から始める</button><button id="no">やめる</button></div>`;
+  $('modal').classList.remove('hidden');
+  ($('yes') as HTMLButtonElement).onclick = () => {
+    if (store) clearSave(store);
+    seed = Math.floor(Math.random() * 1000000) + 1;
+    career = new Career({ seed, squad: newSquad() });
+    season = career.season;
+    log.length = 0;
+    $('modal').classList.add('hidden');
+    render();
+  };
+  ($('no') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+}
+
+/** セーブの書き出し・読み込み（PCとスマホの間で移すため） */
+function openSaveMenu() {
+  $('modalBox').innerHTML = `<div class="text">書き出し：下の文字列を全部コピーして、移したい端末の「読み込み」に貼り付けてください</div>
+    <textarea id="exportText" readonly style="height:60px;font-size:10px">${exportSave(career)}</textarea>
+    <div class="choices"><button id="copy">コピー</button></div>
+    <div class="text">読み込み：書き出した文字列を貼り付けてください（今のセーブは上書きされます）</div>
+    <textarea id="importText" style="height:50px;font-size:10px"></textarea>
+    <div id="saveMsg" class="text" style="font-size:13px"></div>
+    <div class="choices"><button id="doImport">読み込む</button><button id="close">閉じる</button></div>`;
+  $('modal').classList.remove('hidden');
+  ($('copy') as HTMLButtonElement).onclick = async () => {
+    const t = ($('exportText') as HTMLTextAreaElement);
+    try { await navigator.clipboard.writeText(t.value); $('saveMsg').textContent = 'コピーしました'; } catch { t.select(); $('saveMsg').textContent = '選んだ文字列をコピーしてください'; }
+  };
+  ($('doImport') as HTMLButtonElement).onclick = () => {
+    try {
+      career = importSave(($('importText') as HTMLTextAreaElement).value);
+      season = career.season;
+      log.length = 0;
+      log.push('セーブを読み込みました');
+      $('modal').classList.add('hidden');
+      render();
+    } catch (e) {
+      $('saveMsg').textContent = `読み込めませんでした：${(e as Error).message}`;
+    }
+  };
+  ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
+}
+
+($('newYear') as HTMLButtonElement).onclick = startOver;
+($('saveBtn') as HTMLButtonElement).onclick = openSaveMenu;
+
+// 開いた時：セーブがあれば「続きから」「最初から」
+if (saved) {
+  log.push(`続きから（${season.year}年目 ${season.date.month}月${season.date.day}日）`);
+  $('modalBox').innerHTML = `<div class="text">セーブがあります（${season.year}年目 ${season.date.month}月${season.date.day}日）</div>
+    <div class="choices"><button id="cont">続きから</button><button id="fresh">最初から</button></div>`;
+  $('modal').classList.remove('hidden');
+  ($('cont') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); nextModal(); };
+  ($('fresh') as HTMLButtonElement).onclick = startOver;
+}
 render();

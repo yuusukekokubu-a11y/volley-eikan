@@ -65,3 +65,4 @@ table#squad { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bracket .bout { background: rgba(255,255,255,0.06); border-radius: 6px; padding: 2px 5px; line-height: 1.4; }
 .bracket .own { color: #ffd35a; font-weight: 800; }
 .bracket .lost { opacity: 0.45; }
+#modalBox textarea { width: 100%; background: #1d2733; color: var(--text); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; }

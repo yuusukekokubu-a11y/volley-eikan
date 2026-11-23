@@ -9,7 +9,7 @@ import { MANAGER_SKILLS } from '../sim/manager';
 import { fill, TEXTS, type Message } from './texts';
 import type { TeamPolicy } from './cards';
 import type { Graduate } from './roster';
-import { Season, type PracticeHook } from './season';
+import { Season, type PracticeHook, type SeasonData } from './season';
 import type { EventDef } from './events';
 import type { Gender, Squad } from '../sim/types';
 
@@ -19,6 +19,20 @@ export interface CareerOptions {
   gender?: Gender;
   events?: EventDef[];
   onPractice?: PracticeHook;
+}
+
+/** 育成全体のセーブする形 */
+export interface CareerData {
+  seed: number;
+  gender: Gender;
+  graduates: Graduate[];
+  schools: School[];
+  history: Career['history'];
+  reputation: Reputation;
+  managerSkills: OwnedSkill[];
+  expired: string[];
+  expiredMessages: Message[];
+  season: SeasonData;
 }
 
 export class Career {
@@ -99,5 +113,27 @@ export class Career {
       const v = sc.strength + ((wins[sc.id] ?? 0) - 2 * d.expectedWins) * d.perWin + (sc.base - sc.strength) * d.toBase + rng.normal() * d.noise;
       sc.strength = Math.round(Math.max(d.min, Math.min(d.max, v)) * 10) / 10;
     }
+  }
+
+  // ---------------- セーブ ----------------
+
+  toData(): CareerData {
+    return {
+      seed: this.seed, gender: this.gender, graduates: this.graduates, schools: this.schools, history: this.history,
+      reputation: this.reputation, managerSkills: this.managerSkills, expired: this.expired, expiredMessages: this.expiredMessages,
+      season: this.season.toData(),
+    };
+  }
+
+  /** セーブから読み戻す。events・onPractice は保存しない（テストで仮のものを渡す時だけ） */
+  static fromData(d: CareerData, o: { events?: EventDef[]; onPractice?: PracticeHook } = {}): Career {
+    const c = Object.create(Career.prototype) as Career;
+    Object.assign(c, {
+      o: { seed: d.seed, squad: d.season.squad, gender: d.gender, ...o },
+      seed: d.seed, gender: d.gender, graduates: d.graduates, schools: d.schools, history: d.history,
+      reputation: d.reputation, managerSkills: d.managerSkills, expired: d.expired, expiredMessages: d.expiredMessages,
+    });
+    c.season = Season.fromData(d.season, { schools: c.schools, reputation: c.reputation, managerSkills: c.managerSkills, obs: c.graduates, ...o });
+    return c;
   }
 }

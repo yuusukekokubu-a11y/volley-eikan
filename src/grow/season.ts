@@ -13,7 +13,7 @@ import { campOf, dateOf, indexOf, makeBoard, weekdayOf, type BoardDay, type Pane
 import { drawCard, PRACTICE, type Card, type PracticeDef, type TeamPolicy } from './cards';
 import { CAMP, DAYS_IN_YEAR, ENERGY, FIXED_EVENTS, HAND, MONEY, PRACTICE_MATCH, SATURDAY, SCHOOLS, TOURNAMENTS, REPUTATION, YELLOW_BONUS, type TournamentDef } from './constants';
 import { autoLineup, autoRegister, checkRegistration, makeNationals, makePrefecture, makeSchoolPlayers, randomTactics, teamStrength, type School } from './school';
-import { Tournament, type BoutSim, type Entry } from './tournament';
+import { Tournament, type BoutSim, type Entry, type TournamentData } from './tournament';
 import { applyMatchExp, outcomeOf, runMatch, setCount, type MatchOutcome } from './matchplay';
 import { addReputation, learnSkill, rankOf, rollSkill, type OwnedSkill, type Reputation, type SkillSource } from './reputation';
 import type { MatchOptions } from '../sim/game';
@@ -139,8 +139,61 @@ export interface ScheduledMatch {
   via: 'card' | 'invite' | 'manager';
 }
 
+/** 1年度分のセーブする形（盤面も保存する。作り方を後で直しても、古いセーブの盤面は変わらない） */
+export interface SeasonData {
+  seed: number;
+  year: number;
+  board: BoardDay[];
+  day: number;
+  lane: number;
+  hand: Card[];
+  squad: Squad;
+  policy: TeamPolicy;
+  flags: Record<string, boolean>;
+  money: number;
+  equipment: string[];
+  /** 待っているイベント（イベントは ID で持つ） */
+  pending: SavedEvent | null;
+  queue: SavedEvent[];
+  branchWait: { left: number; card: Card | null } | null;
+  monthWait: { left: number; card: Card | null } | null;
+  rng: number;
+  gender: Gender;
+  graduates: Graduate[];
+  newcomerIds: string[];
+  measured: { id: string; cm: number }[];
+  practiceOpen: boolean;
+  outbox: Message[];
+  campEnding: boolean;
+  tournaments: Partial<Record<TournamentDef['id'], TournamentData>>;
+  qualified: Partial<Record<TournamentDef['id'], boolean>>;
+  tournamentDay: number | null;
+  pendingMatch: PendingMatch | null;
+  repGained: number;
+  skillOffer: SkillOffer | null;
+  scheduledMatch: ScheduledMatch | null;
+  matchChoices: MatchOpponent[] | null;
+  matchInvite: MatchOpponent | null;
+}
+
+interface SavedEvent {
+  defId: string;
+  subjectId?: string;
+  text: string;
+}
+
+/** 読み戻す時に、育成全体と共有するもの */
+export interface SeasonLinks {
+  schools: School[];
+  reputation: Reputation;
+  managerSkills: OwnedSkill[];
+  obs: Graduate[];
+  events?: EventDef[];
+  onPractice?: PracticeHook;
+}
+
 export class Season {
-  readonly board: BoardDay[];
+  board: BoardDay[];
   year: number;
   /** 今いる日（年の中の日。0＝4月1日）と道（分かれ道の中では0か1） */
   day = 0;
@@ -411,6 +464,11 @@ export class Season {
     this.branchWait = null;
     this.lane = lane;
     return this.move(left, card, true);
+  }
+
+  /** 分かれ道で、道を選ぶのを待っている（セーブから読み戻した時の画面用） */
+  get needBranch(): boolean {
+    return !!this.branchWait;
   }
 
   /** 月初めを通り過ぎる途中で一時停止している */
@@ -895,6 +953,51 @@ export class Season {
     // 選択肢のないイベントは、すぐに効果をかける
     if (!ev.def.choices?.length) this.choose();
     return ev;
+  }
+
+  // ---------------- セーブ ----------------
+
+  toData(): SeasonData {
+    const ev = (e: PendingEvent): SavedEvent => ({ defId: e.def.id, subjectId: e.subjectId, text: e.text });
+    const tours: SeasonData['tournaments'] = {};
+    for (const [id, t] of Object.entries(this.tournaments)) if (t) tours[id as TournamentDef['id']] = t.toData();
+    return {
+      seed: this.seed, year: this.year, board: this.board, day: this.day, lane: this.lane, hand: this.hand, squad: this.squad,
+      policy: this.policy, flags: this.flags, money: this.money, equipment: this.equipment,
+      pending: this.pending ? ev(this.pending) : null, queue: this.queue.map(ev),
+      branchWait: this.branchWait, monthWait: this.monthWait, rng: this.rng.state, gender: this.gender,
+      graduates: this.graduates, newcomerIds: this.newcomers.map(p => p.id), measured: this.measured,
+      practiceOpen: this.practiceOpen, outbox: this.outbox, campEnding: this.campEnding, tournaments: tours,
+      qualified: this.qualified, tournamentDay: this.tournamentDay, pendingMatch: this.pendingMatch, repGained: this.repGained,
+      skillOffer: this.skillOffer, scheduledMatch: this.scheduledMatch, matchChoices: this.matchChoices, matchInvite: this.matchInvite,
+    };
+  }
+
+  /** セーブから読み戻す（コンストラクタは通さない：盤面・手札・乱数はセーブのまま） */
+  static fromData(d: SeasonData, links: SeasonLinks): Season {
+    const s = Object.create(Season.prototype) as Season;
+    const events = links.events ?? EVENTS;
+    const ev = (e: SavedEvent): PendingEvent => {
+      const def = events.find(x => x.id === e.defId);
+      if (!def) throw new Error(`セーブのイベントが見つかりません: ${e.defId}`);
+      return { def, subjectId: e.subjectId, text: e.text };
+    };
+    const rng = new Rng(0);
+    rng.state = d.rng;
+    const tournaments: Season['tournaments'] = {};
+    for (const [id, t] of Object.entries(d.tournaments)) if (t) tournaments[id as TournamentDef['id']] = Tournament.fromData(t);
+    Object.assign(s, {
+      seed: d.seed, year: d.year, board: d.board, day: d.day, lane: d.lane, hand: d.hand, squad: d.squad,
+      policy: d.policy, flags: d.flags, money: d.money, equipment: d.equipment,
+      pending: d.pending ? ev(d.pending) : null, queue: d.queue.map(ev),
+      branchWait: d.branchWait, monthWait: d.monthWait, rng, gender: d.gender, events, onPractice: links.onPractice, log: [],
+      graduates: d.graduates, newcomers: d.squad.players.filter(p => d.newcomerIds.includes(p.id)), measured: d.measured,
+      practiceOpen: d.practiceOpen, outbox: d.outbox, campEnding: d.campEnding, tournaments,
+      qualified: d.qualified, tournamentDay: d.tournamentDay, pendingMatch: d.pendingMatch, repGained: d.repGained,
+      skillOffer: d.skillOffer, scheduledMatch: d.scheduledMatch, matchChoices: d.matchChoices, matchInvite: d.matchInvite,
+      schools: links.schools, reputation: links.reputation, managerSkills: links.managerSkills, obs: links.obs,
+    });
+    return s;
   }
 }
 
