@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>共通部品の見本</title>
+    <link rel="stylesheet" href="/src/view/parts/parts.css" />
+    <style>
+      body { margin: 0; background: #1d2733; color: #f4f6f8; font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif; padding: 10px; }
+      h1 { font-size: 18px; margin: 4px 0 6px; } h2 { font-size: 15px; margin: 18px 0 4px; }
+      p.note { font-size: 12px; opacity: 0.75; margin: 2px 0 6px; }
+      .phone { position: relative; width: 844px; max-width: 100%; height: 390px; background: #16202b; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); }
+      .phone .list { height: 100%; overflow-y: auto; }
+      .legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>共通部品の見本（選手一覧の1行・選手の詳細）</h1>
+    <p class="note">枠はスマホ横持ち（844×390）の大きさです。行を押すと、右半分に詳細が出ます（詳細の外か「閉じる」で閉じる）。データは見本用です。</p>
+    <h2>色の案</h2>
+    <div id="legend"></div>
+    <div id="sections"></div>
+    <script type="module" src="/src/view/parts/sample.ts"></script>
+  </body>
+</html>

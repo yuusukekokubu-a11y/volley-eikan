@@ -1,0 +1,77 @@
+/* 共通部品（選手一覧の1行・選手の詳細）の見た目。試合の画面・育成の画面・見本ページで読み込む */
+:root {
+  /* 能力の段階の色（案）：高い段階ほど暖かい色、低い段階ほど寒い色・灰色 */
+  --rk-S: #f4c430; --rk-A: #ef5b4c; --rk-B: #f08a3e; --rk-C: #e2c94a;
+  --rk-D: #6cc070; --rk-E: #4fa3e0; --rk-F: #8f86d8; --rk-G: #7c848e;
+  /* 調子 */
+  --c-best: #fbbf24; --c-good: #86efac; --c-normal: #d1d5db; --c-bad: #93c5fd; --c-worst: #a5a2f0;
+  /* 特能 */
+  --tr-gold: #c9a227; --tr-blue: #2f63c9; --tr-red: #b8423b; --tr-style: #2f8a4f; --tr-unlock: #5c6470; --tr-other: #6b5ca5;
+}
+
+/* ---------- 一覧の1行 ---------- */
+.prow {
+  display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 2px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07); font-size: 13px; white-space: nowrap; cursor: pointer;
+}
+.prow.head { min-height: 22px; font-size: 10px; opacity: 0.65; cursor: default; }
+.prow.sel { background: rgba(47, 99, 201, 0.35); }
+.prow.dim { opacity: 0.55; }
+.prow > span { flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; }
+.prow .c-where { width: 34px; font-size: 11px; opacity: 0.8; }
+.prow .c-no { width: 20px; text-align: right; font-weight: 800; }
+.prow .c-name { width: 58px; font-weight: 700; }
+.prow .c-name .new { margin-left: 2px; font-size: 9px; color: #ffd35a; }
+.prow .c-grade { width: 14px; text-align: center; }
+.prow .c-role { width: 30px; font-size: 12px; opacity: 0.9; }
+.prow .c-height { width: 28px; font-size: 12px; text-align: right; }
+.prow .c-cond { width: 38px; }
+.prow .c-abilities { display: flex; gap: 2px; }
+.prow .c-energy { width: 58px; display: flex; align-items: center; gap: 3px; }
+.prow .c-practice { width: 74px; }
+.prow .c-traits { flex: 1 1 auto; min-width: 80px; }
+.prow .c-tired { flex: 1 1 auto; font-size: 11px; color: #ffb47a; }
+.prow.m-stop .c-traits { flex: 0 1 auto; max-width: 210px; }
+
+/* 能力：段階（色つき）と数値。横幅が足りないので数値は小さめ */
+.ab { display: inline-flex; align-items: baseline; justify-content: flex-start; width: 36px; gap: 1px; }
+.prow.head .ab { justify-content: center; }
+.ab .rk { display: inline-block; min-width: 14px; text-align: center; border-radius: 3px; font-size: 12px; font-weight: 900; color: #111; line-height: 16px; }
+.ab small { font-size: 10px; opacity: 0.9; }
+.rk-S { background: var(--rk-S); } .rk-A { background: var(--rk-A); } .rk-B { background: var(--rk-B); } .rk-C { background: var(--rk-C); }
+.rk-D { background: var(--rk-D); } .rk-E { background: var(--rk-E); } .rk-F { background: var(--rk-F); } .rk-G { background: var(--rk-G); }
+
+.cond { font-size: 11px; font-weight: 700; }
+.c-best { color: var(--c-best); } .c-good { color: var(--c-good); } .c-normal { color: var(--c-normal); }
+.c-bad { color: var(--c-bad); } .c-worst { color: var(--c-worst); }
+
+.tr { display: inline-block; padding: 1px 5px; margin: 0 2px 0 0; border-radius: 5px; font-size: 11px; color: #fff; line-height: 16px; }
+.tr-gold { background: var(--tr-gold); color: #111; } .tr-blue { background: var(--tr-blue); } .tr-red { background: var(--tr-red); }
+.tr-style { background: var(--tr-style); } .tr-unlock { background: var(--tr-unlock); } .tr-other { background: var(--tr-other); }
+.more { font-size: 11px; opacity: 0.8; }
+.none { opacity: 0.5; }
+.retired { font-size: 11px; color: #ffb47a; }
+.bar { display: inline-block; width: 34px; height: 7px; background: rgba(255, 255, 255, 0.15); border-radius: 4px; vertical-align: middle; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: #6fd18b; }
+.pbtn { min-height: 34px; padding: 0 6px; font-size: 11px; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.14); color: inherit; font-weight: 700; }
+
+/* ---------- 選手の詳細（右半分に重ねる） ---------- */
+.pd-layer { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.25); }
+.pd-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 50%; min-width: 360px; box-sizing: border-box;
+  background: #0f1720; border-left: 1px solid rgba(255, 255, 255, 0.12); padding: 10px 12px 60px; overflow-y: auto; color: #f4f6f8;
+}
+.pd-close { position: absolute; right: 10px; bottom: 10px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 9px; background: #2f63c9; color: #fff; font-weight: 700; font-size: 14px; }
+.pd { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.pd-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.pd-no { font-size: 22px; } .pd-name { font-size: 18px; }
+.pd .lbl { font-size: 11px; opacity: 0.65; margin-right: 6px; }
+.pd-abil { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 10px; }
+.pd-abil > div { display: flex; align-items: baseline; justify-content: space-between; }
+.pd-abil .ab { width: auto; gap: 4px; }
+.pd-abil .ab .rk { font-size: 15px; min-width: 20px; line-height: 20px; }
+.pd-abil .ab small { font-size: 15px; }
+.pd-apt { display: inline-flex; gap: 10px; }
+.pd-apt b { margin-left: 2px; }
+.pd-trait { display: flex; align-items: baseline; gap: 6px; margin: 3px 0; }
+.pd-trait small { opacity: 0.8; }
