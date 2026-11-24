@@ -41,6 +41,20 @@ const COND_CLASS = ['c-worst', 'c-bad', 'c-normal', 'c-good', 'c-best'];
 
 export const bestRole = (p: Player): Role => (Object.entries(p.aptitude) as [Role, number][]).sort((a, b) => b[1] - a[1])[0][0];
 
+/**
+ * 適性の記号（－△○◎）。フォントによって記号の大きさや高さがそろわないので、文字ではなく同じ大きさの図で描く。
+ * 読み上げ・コピー用に文字の記号も持たせる
+ */
+export function aptMarkHtml(stage: number): string {
+  const shape = [
+    '<line x1="3" y1="8" x2="13" y2="8" />',
+    '<polygon points="8,2.5 13.5,13 2.5,13" />',
+    '<circle cx="8" cy="8" r="5.5" />',
+    '<circle cx="8" cy="8" r="5.8" /><circle cx="8" cy="8" r="2.8" />',
+  ][stage] ?? '';
+  return `<svg class="apt apt-${stage}" viewBox="0 0 16 16" role="img" aria-label="${APT_MARK[stage]}">${shape}</svg>`;
+}
+
 /** 能力の段階と数値（「B 72」）。段階は色つき */
 export function abilityHtml(v: number): string {
   const r = abilityRank(v);
@@ -128,7 +142,7 @@ export function playerDetailHtml(p: Player, ctx: RowContext): string {
       <span>${ROLE_NAME[role]}</span>${ctx.year !== undefined ? `<span>${gradeOf(p, ctx.year)}年</span>` : ''}
       <span>${p.height}cm</span><span>${p.hand === 'left' ? '左利き' : '右利き'}</span>${conditionHtml(p.condition)}${p.retired ? '<span class="retired">引退</span>' : ''}</div>
     <div class="pd-sec"><div class="pd-abil">${ABILITY_KEYS.map(k => `<div><span class="lbl">${ABILITY_NAME[k]}</span>${abilityHtml(p[k])}</div>`).join('')}</div></div>
-    <div class="pd-sec"><span class="lbl">適性</span><span class="pd-apt">${roles.map(r => `<span>${ROLE_SHORT[r]}<b>${APT_MARK[p.aptitude[r]]}</b></span>`).join('')}</span></div>
+    <div class="pd-sec"><span class="lbl">適性</span><span class="pd-apt">${roles.map(r => `<span>${ROLE_SHORT[r]}${aptMarkHtml(p.aptitude[r])}</span>`).join('')}</span></div>
     <div class="pd-sec"><div class="lbl">特能</div><div class="pd-traits">${traits.length ? traits.map(traitChip).join('') : '<span class="none">なし</span>'}</div></div>
     ${grow ? `<div class="pd-sec"><span class="lbl">体力</span><span class="bar"><i style="width:${Math.round(p.energy)}%"></i></span> ${Math.round(p.energy)}　<span class="lbl">練習指示</span>${ctx.practice ?? ''}</div>` : ''}
     ${ctx.tired ? `<div class="pd-sec">${ctx.tired}</div>` : ''}

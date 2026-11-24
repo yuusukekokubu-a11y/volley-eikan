@@ -73,7 +73,9 @@
 .pd-abil .ab { width: auto; gap: 4px; }
 .pd-abil .ab .rk { font-size: 18px; min-width: 24px; line-height: 24px; }
 .pd-abil .ab small { font-size: 18px; }
-.pd-apt { display: inline-flex; gap: 10px; }
-.pd-apt b { margin-left: 2px; }
+.pd-apt { display: inline-flex; gap: 14px; align-items: center; }
+.pd-apt > span { display: inline-flex; align-items: center; gap: 4px; }
+/* 適性の記号：4つとも同じ幅・同じ高さで、文字の真ん中の高さにそろえる */
+.apt { width: 1em; height: 1em; flex: 0 0 1em; display: block; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .pd-traits { display: flex; flex-wrap: wrap; gap: 6px; }
 .pd-traits .tr { font-size: 14px; padding: 3px 8px; }
