@@ -10,6 +10,8 @@
 }
 
 /* ---------- 一覧の1行 ---------- */
+/* 一覧の入れ物：行は縮めず、入れ物が狭ければ横に送って見る */
+.plist { min-width: max-content; }
 .prow {
   display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 2px 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07); font-size: 13px; white-space: nowrap; cursor: pointer;
@@ -55,23 +57,23 @@
 .bar i { display: block; height: 100%; border-radius: 4px; background: #6fd18b; }
 .pbtn { min-height: 34px; padding: 0 6px; font-size: 11px; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.14); color: inherit; font-weight: 700; }
 
-/* ---------- 選手の詳細（右半分に重ねる） ---------- */
-.pd-layer { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.25); }
+/* ---------- 選手の詳細（真ん中に大きく出す） ---------- */
+.pd-layer { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; }
 .pd-panel {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 50%; min-width: 360px; box-sizing: border-box;
-  background: #0f1720; border-left: 1px solid rgba(255, 255, 255, 0.12); padding: 10px 12px 60px; overflow-y: auto; color: #f4f6f8;
+  position: relative; width: 92%; max-width: 780px; max-height: 92%; box-sizing: border-box;
+  background: #0f1720; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 12px 16px 64px; overflow-y: auto; color: #f4f6f8;
 }
-.pd-close { position: absolute; right: 10px; bottom: 10px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 9px; background: #2f63c9; color: #fff; font-weight: 700; font-size: 14px; }
-.pd { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.pd-close { position: absolute; right: 12px; bottom: 12px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 9px; background: #2f63c9; color: #fff; font-weight: 700; font-size: 15px; font-family: inherit; }
+.pd { display: flex; flex-direction: column; gap: 10px; font-size: 15px; }
 .pd-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .pd-no { font-size: 22px; } .pd-name { font-size: 18px; }
-.pd .lbl { font-size: 11px; opacity: 0.65; margin-right: 6px; }
-.pd-abil { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 10px; }
+.pd .lbl { font-size: 12px; opacity: 0.65; margin-right: 6px; }
+.pd-abil { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 24px; }
 .pd-abil > div { display: flex; align-items: baseline; justify-content: space-between; }
 .pd-abil .ab { width: auto; gap: 4px; }
-.pd-abil .ab .rk { font-size: 15px; min-width: 20px; line-height: 20px; }
-.pd-abil .ab small { font-size: 15px; }
+.pd-abil .ab .rk { font-size: 18px; min-width: 24px; line-height: 24px; }
+.pd-abil .ab small { font-size: 18px; }
 .pd-apt { display: inline-flex; gap: 10px; }
 .pd-apt b { margin-left: 2px; }
-.pd-trait { display: flex; align-items: baseline; gap: 6px; margin: 3px 0; }
-.pd-trait small { opacity: 0.8; }
+.pd-traits { display: flex; flex-wrap: wrap; gap: 6px; }
+.pd-traits .tr { font-size: 14px; padding: 3px 8px; }

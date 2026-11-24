@@ -34,11 +34,6 @@ button:disabled { opacity: 0.35; }
 #hand button b { font-size: 22px; }
 #hand button small { font-size: 11px; opacity: 0.9; }
 #log { flex: 1; overflow-y: auto; font-size: 12px; background: var(--panel); border-radius: 10px; padding: 4px 8px; line-height: 1.5; }
-table#squad { width: 100%; border-collapse: collapse; font-size: 12px; }
-#squad td, #squad th { padding: 3px 4px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); white-space: nowrap; }
-#squad th { font-size: 11px; opacity: 0.7; font-weight: 600; }
-.bar { display: inline-block; width: 60px; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; vertical-align: middle; }
-.bar i { display: block; height: 100%; border-radius: 4px; background: #6fd18b; }
 .hurt { color: #ff9d7a; }
 #modal { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 5; }
 #modal.hidden { display: none; }
@@ -50,7 +45,6 @@ table#squad { width: 100%; border-collapse: collapse; font-size: 12px; }
 @media (orientation: portrait) and (max-width: 700px) { #portrait { display: flex; } }
 
 #gym { opacity: 0.8; margin-right: 6px; }
-#squad button.small { min-height: 30px; padding: 0 6px; font-size: 11px; }
 #modalBox .choices button.off { background: rgba(255,255,255,0.12); }
 #shopTable { border-collapse: collapse; font-size: 13px; }
 #shopTable td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -66,6 +60,3 @@ table#squad { width: 100%; border-collapse: collapse; font-size: 12px; }
 .bracket .own { color: #ffd35a; font-weight: 800; }
 .bracket .lost { opacity: 0.45; }
 #modalBox textarea { width: 100%; background: #1d2733; color: var(--text); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; }
-.tr { display: inline-block; padding: 1px 5px; margin: 1px 2px; border-radius: 5px; font-size: 11px; background: rgba(255,255,255,0.12); }
-.tr.blue { background: #2f63c9; } .tr.red { background: #b33a3a; } .tr.gold { background: #b8902a; } .tr.style { background: #2f8a4f; } .tr.unlock { background: #5a5f6a; }
-td.traits { white-space: normal; min-width: 120px; }

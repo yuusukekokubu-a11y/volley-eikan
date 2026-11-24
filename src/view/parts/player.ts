@@ -115,7 +115,7 @@ export function playerRowHtml(p: Player, ctx: RowContext): string {
   return `<div class="${cls}" data-player="${p.id}" role="button">${COLS[ctx.mode].map(cell).join('')}</div>`;
 }
 
-/** 選手の詳細（右半分に重ねて出す中身） */
+/** 選手の詳細（真ん中に大きく出す中身）。特能は名前（色つき）だけ。説明文はゲームとは別の「特能の一覧」のページに載せる */
 export function playerDetailHtml(p: Player, ctx: RowContext): string {
   const role = ctx.role ?? bestRole(p);
   const roles = Object.keys(ROLE_NAME) as Role[];
@@ -129,16 +129,15 @@ export function playerDetailHtml(p: Player, ctx: RowContext): string {
       <span>${p.height}cm</span><span>${p.hand === 'left' ? '左利き' : '右利き'}</span>${conditionHtml(p.condition)}${p.retired ? '<span class="retired">引退</span>' : ''}</div>
     <div class="pd-sec"><div class="pd-abil">${ABILITY_KEYS.map(k => `<div><span class="lbl">${ABILITY_NAME[k]}</span>${abilityHtml(p[k])}</div>`).join('')}</div></div>
     <div class="pd-sec"><span class="lbl">適性</span><span class="pd-apt">${roles.map(r => `<span>${ROLE_SHORT[r]}<b>${APT_MARK[p.aptitude[r]]}</b></span>`).join('')}</span></div>
-    <div class="pd-sec"><div class="lbl">特能</div>${traits.length ? traits.map(t => `<div class="pd-trait">${traitChip(t)}<small>${t.desc ?? ''}</small></div>`).join('') : '<span class="none">なし</span>'}</div>
+    <div class="pd-sec"><div class="lbl">特能</div><div class="pd-traits">${traits.length ? traits.map(traitChip).join('') : '<span class="none">なし</span>'}</div></div>
     ${grow ? `<div class="pd-sec"><span class="lbl">体力</span><span class="bar"><i style="width:${Math.round(p.energy)}%"></i></span> ${Math.round(p.energy)}　<span class="lbl">練習指示</span>${ctx.practice ?? ''}</div>` : ''}
     ${ctx.tired ? `<div class="pd-sec">${ctx.tired}</div>` : ''}
     <div class="pd-sec"><span class="lbl">通算</span>${st.matches}試合・${st.sets}セット・スパイク得点 ${st.kills}・ブロック得点 ${st.blockPoints}・サービスエース ${st.aces}</div>
-    <div class="pd-sec pd-comment"><span class="lbl">寸評</span><span class="none">（文章は後で入れる）</span></div>
   </div>`;
 }
 
 /**
- * 詳細を右半分に重ねて出す。root は画面全体の入れ物。閉じるボタンか、詳細の外（左側）を押すと閉じる
+ * 詳細を真ん中に大きく出す。root は画面全体の入れ物。閉じるボタンか、詳細の外を押すと閉じる
  */
 export function showPlayerDetail(root: HTMLElement, p: Player, ctx: RowContext, onClose?: () => void) {
   closePlayerDetail(root);

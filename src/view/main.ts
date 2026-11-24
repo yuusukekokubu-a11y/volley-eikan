@@ -9,11 +9,10 @@ import { aceOf, MANAGER_MAX, MANAGER_SKILL_IDS, MANAGER_SKILLS } from '../sim/ma
 import { OWN, SetGame, type StopInfo } from '../sim/match';
 import { makeBench, makeTeam } from '../sim/sample';
 import { TRAITS } from '../sim/traits';
-import type { AttackTactic, BlockTactic, Gender, Player, RallyRecord, ReceiveTactic, Role, Tactics, TeamId, TrainKey } from '../sim/types';
-import { abilityRank, APT_MARK, PLAYBACK_RATE } from './common';
-import { gradeOf } from '../sim/player';
-import { SAMPLE_YEAR } from '../sim/sample';
+import type { AttackTactic, BlockTactic, Gender, Player, RallyRecord, ReceiveTactic, Role, Tactics, TeamId, TeamState } from '../sim/types';
+import { PLAYBACK_RATE } from './common';
 import { Playback, pointText } from './playback';
+import { bindRows, playerRowHtml, rowHeadHtml, showPlayerDetail, type RowContext } from './parts/player';
 import { Render3D } from './render3d';
 
 const SPEEDS = [1, 2, 4];
@@ -162,7 +161,6 @@ function updateHud() {
 // ---------------- 共通 ----------------
 
 const ROLE_NAME: Record<Role, string> = { S: 'セッター', OH: 'アウトサイド', MB: 'ミドル', OP: 'オポジット', L: 'リベロ' };
-const COND = ['絶不調', '不調', '普通', '好調', '絶好調'];
 
 function openPanel() {
   stopped = true;
@@ -183,21 +181,24 @@ function tiredHtml(p: Player, fatigue: Record<string, number>): string {
   return f >= FATIGUE.tiredNote ? '<span class="tired">足が止まってきた</span>' : '';
 }
 
-const ABIL: [TrainKey, string][] = [['jump', '跳躍'], ['power', 'パワー'], ['speed', 'スピード'], ['technique', 'テク'], ['block', 'ブロック'], ['stamina', 'スタミナ']];
-const APT_ROLES: [Role, string][] = [['S', 'S'], ['OH', 'OH'], ['MB', 'MB'], ['OP', 'OP'], ['L', 'L']];
-
-/** 選手の一覧の1人分（2行）：背番号・ポジション・学年・身長・6能力（段階＋数値）・調子／適性の記号・特能・疲れ */
-function playerLine(p: Player, role: Role, fatigue: Record<string, number>, bench = false): string {
-  const traits = p.traits.map(id => TRAITS[id]?.name).filter(Boolean).join('・') || '－';
-  const ab = ABIL.map(([k]) => `<td class="ab"><b>${abilityRank(p[k])}</b> ${p[k]}</td>`).join('');
-  const apt = APT_ROLES.map(([r, n]) => `${n}:${APT_MARK[p.aptitude[r]]}`).join('　');
-  const cls = bench ? 'bench' : '';
-  return `<tr class="${cls} r1"><td>${p.number}</td><td>${ROLE_NAME[role]}</td><td>${gradeOf(p, SAMPLE_YEAR)}年</td><td>${p.height}</td>${ab}<td>${COND[p.condition + 2]}</td></tr>
-    <tr class="${cls} r2"><td></td><td colspan="10">適性 ${apt}　特能 ${traits} ${tiredHtml(p, fatigue)}</td></tr>`;
+/** 自チームの一覧（共通部品の行）：コート・リベロ・控え。行を押すと詳細を真ん中に出す */
+function rosterParts(team: TeamState, bench: Player[], fatigue: Record<string, number>, mode: 'pregame' | 'stop'): { html: string; find: (id: string) => [Player, RowContext] | undefined } {
+  const items: [Player, RowContext][] = [
+    ...team.rotation.map(sl => [sl.player, { mode, role: sl.role, where: 'コート' }] as [Player, RowContext]),
+    ...(team.libero ? [[team.libero, { mode, role: 'L' as Role, where: 'リベロ' }] as [Player, RowContext]] : []),
+    ...bench.map(p => [p, { mode, where: '控え', dim: true }] as [Player, RowContext]),
+  ];
+  for (const [p, ctx] of items) if ((fatigue[p.id] ?? 0) >= FATIGUE.tiredNote) ctx.tired = '足が止まってきた';
+  return {
+    html: `<div class="plist">${rowHeadHtml(mode)}${items.map(([p, ctx]) => playerRowHtml(p, ctx)).join('')}</div>`,
+    find: id => items.find(([p]) => p.id === id),
+  };
 }
 
-function rosterHtml(rows: string): string {
-  return `<table class="roster"><tr><th>背番号</th><th>ポジション</th><th>学年</th><th>身長</th>${ABIL.map(([, n]) => `<th>${n}</th>`).join('')}<th>調子</th></tr>${rows}</table>`;
+/** 一覧を入れて、行を押すと詳細を出すようにする */
+function mountRoster(el: HTMLElement, r: ReturnType<typeof rosterParts>, extra = '') {
+  el.insertAdjacentHTML('beforeend', r.html + extra);
+  bindRows(el, id => { const it = r.find(id); if (it) showPlayerDetail($('app'), it[0], it[1]); });
 }
 
 function btn(label: string, on: () => void, disabled = false, cls = ''): HTMLButtonElement {
@@ -313,11 +314,8 @@ function renderLineup() {
   $('stopRight').innerHTML = `${skillRow}${scoutingHtml()}
     <div class="hint">2か所を続けて押すと入れ替え（控え→位置・リベロで先発と交代）</div>
     <div class="brow"><span class="label">控え</span><span class="picklist">${benchRows || '－'}</span></div>
-    ${tacticsHtml(team.tactics)}
-    ${rosterHtml(team.rotation.map(sl => playerLine(sl.player, sl.role, match.fatigue)).join('')
-      + (team.libero ? playerLine(team.libero, 'L', match.fatigue) : '')
-      + match.bench[OWN].map(p => playerLine(p, bestRole(p), match.fatigue, true)).join(''))}
-    <div class="hint">薄い行は控え</div>`;
+    ${tacticsHtml(team.tactics)}`;
+  mountRoster($('stopRight'), rosterParts(team, match.bench[OWN], match.fatigue, 'pregame'), '<div class="hint">行を押すと選手の詳細</div>');
 
   // 試合の形（試合前だけ）。並びを保ったまま作り直す
   for (const b of Array.from($('stopLeft').querySelectorAll<HTMLButtonElement>('button[data-best]'))) {
@@ -439,10 +437,8 @@ function renderStopMain() {
       <br>監督特能：${managerSkills.map(id => MANAGER_SKILLS[id].name).join('・') || 'なし'}${buffsHtml(g)}</div>
     <div class="card">${rotationHtml(g)}</div>`;
   const team = g.teams[OWN];
-  const rows = team.rotation.map(sl => playerLine(sl.player, sl.role, g.fatigue)).join('')
-    + (team.libero ? playerLine(team.libero, 'L', g.fatigue) : '')
-    + g.bench[OWN].map(p => playerLine(p, bestRole(p), g.fatigue, true)).join('');
-  $('stopRight').innerHTML = `${rosterHtml(rows)}<div class="hint">薄い行は控え</div>`;
+  $('stopRight').innerHTML = '';
+  mountRoster($('stopRight'), rosterParts(team, g.bench[OWN], g.fatigue, 'stop'), '<div class="hint">薄い行は控え。行を押すと選手の詳細</div>');
   const box = $('stopButtons');
   box.innerHTML = '';
   box.append(

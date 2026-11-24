@@ -3,8 +3,8 @@
 
 import { FIXED_EVENTS, MONEY } from '../grow/constants';
 import { EQUIPMENT } from '../grow/practice';
-import { abilityRank, APT_MARK } from './common';
-import { TRAITS } from '../sim/traits';
+import { abilityRank } from './common';
+import { bindRows, playerRowHtml, rowHeadHtml, showPlayerDetail, type RowContext } from './parts/player';
 import { REPUTATION } from '../grow/constants';
 import { POLICY, PRACTICE, type TeamPolicy } from '../grow/cards';
 import { Career } from '../grow/career';
@@ -20,7 +20,6 @@ import { MANAGER_SKILLS } from '../sim/manager';
 import { fill, TEXTS, type Message } from '../grow/texts';
 import { Rng } from '../sim/rng';
 import type { BoardDay, Panel } from '../grow/board';
-import { gradeOf } from '../sim/player';
 import type { Player, Role, Squad, TrainKey } from '../sim/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -103,25 +102,19 @@ function render() {
   });
   ($('rest') as HTMLButtonElement).disabled = busy;
   ($('nextYear') as HTMLButtonElement).disabled = !season.over;
-  // 選手：能力（段階＋数値）、体力、調子、練習指示（押すと変える）
-  const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
-  const COND = ['絶不調', '不調', '普通', '好調', '絶好調'];
-  const rows = season.squad.players.map(p => {
-    const ab = KEYS.map(k => `<td>${abilityRank(p[k])}${p[k]}</td>`).join('');
-    const focus = p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus];
-    const isNew = season.newcomers.includes(p) ? '（新）' : '';
-    const traits = p.traits.map(id => TRAITS[id]).filter(Boolean).map(t => `<span class="tr ${t!.kind === 'stat' ? t!.color : t!.kind}">${t!.name}</span>`).join('');
-    return `<tr><td>${p.number}</td><td><button class="small" data-pd="${p.id}">${p.name}${isNew}</button></td><td>${p.height}</td><td>${ROLE_NAME[bestRole(p)].slice(0, 3)}</td><td>${gradeOf(p, season.year)}</td>${ab}
-      <td><span class="bar"><i style="width:${p.energy}%"></i></span>${Math.round(p.energy)}</td><td>${COND[p.condition + 2]}</td>
-      <td>${p.retired ? '引退' : `<button class="small" data-pr="${p.id}" ${season.practiceOpen ? '' : 'disabled'}>${focus}・${ROLE_NAME[p.practice.position].slice(0, 3)}</button>`}</td><td class="traits">${traits || '－'}</td></tr>`;
-  }).join('');
-  $('squad').innerHTML = `<tr><th>番</th><th>名前</th><th>身長</th><th>位置</th><th>年</th>${KEYS.map(k => `<th>${ABILITY_NAME[k].slice(0, 2)}</th>`).join('')}<th>体力</th><th>調子</th><th>練習指示</th><th>特能</th></tr>${rows}`;
+  // 選手の一覧（共通部品の行）：押すと詳細。練習指示のボタンは月初めなどだけ押せる
+  const ctxOf = (p: Player): RowContext => ({
+    mode: 'grow', year: season.year, isNew: season.newcomers.includes(p), practiceButton: season.practiceOpen && !p.retired,
+    practice: `${p.practice.focus === 'auto' ? 'おまかせ' : ABILITY_NAME[p.practice.focus]}・${ROLE_NAME[p.practice.position].slice(0, 3)}`,
+  });
+  $('squad').innerHTML = rowHeadHtml('grow') + season.squad.players.map(p => playerRowHtml(p, ctxOf(p))).join('');
   for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pr]'))) {
     b.onclick = () => openPractice(b.getAttribute('data-pr')!);
   }
-  for (const b of Array.from($('squad').querySelectorAll<HTMLButtonElement>('button[data-pd]'))) {
-    b.onclick = () => openPlayer(b.getAttribute('data-pd')!);
-  }
+  bindRows($('squad'), id => {
+    const p = season.squad.players.find(x => x.id === id);
+    if (p) showPlayerDetail($('app'), p, ctxOf(p));
+  });
   $('log').innerHTML = log.slice(-30).reverse().map(l => `<div>${l}</div>`).join('');
 }
 
@@ -239,28 +232,6 @@ function openEvent() {
     };
     $('choices').appendChild(b);
   });
-  $('modal').classList.remove('hidden');
-}
-
-/** 選手の詳細（仮）：適性・特能・通算成績など。作り込みは第4段階の共通部品で */
-function openPlayer(id: string) {
-  const p = season.squad.players.find(x => x.id === id)!;
-  const KEYS: TrainKey[] = ['jump', 'power', 'speed', 'technique', 'block', 'stamina'];
-  const apt = (Object.keys(ROLE_NAME) as Role[]).map(r => `${ROLE_NAME[r]} ${APT_MARK[p.aptitude[r]]}`).join('　');
-  const traits = p.traits.map(t => TRAITS[t]).filter(Boolean).map(t => {
-    const color = t!.kind === 'stat' ? ({ blue: '青', red: '赤', gold: '金', other: '' } as Record<string, string>)[t!.color] : t!.kind === 'style' ? '緑' : '解禁';
-    return `<div><span class="tr ${t!.kind === 'stat' ? t!.color : t!.kind}">${t!.name}</span> <small>${color}${t!.desc ? `：${t!.desc}` : ''}</small></div>`;
-  }).join('') || '－';
-  const st = p.stats;
-  $('modalBox').innerHTML = `<div class="text">${p.number}番 ${p.name}（${gradeOf(p, season.year)}年・${p.hand === 'left' ? '左利き' : '右利き'}・${p.height}cm）${p.retired ? '　引退' : ''}</div>
-    <div style="max-height:230px;overflow-y:auto;font-size:13px;line-height:1.7">
-      <div>能力：${KEYS.map(k => `${ABILITY_NAME[k]} ${abilityRank(p[k])}${p[k]}`).join('　')}</div>
-      <div>適性：${apt}</div>
-      <div>特能：</div>${traits}
-      <div>通算：${st.matches}試合・${st.sets}セット・スパイク得点 ${st.kills}・ブロック得点 ${st.blockPoints}・サービスエース ${st.aces}</div>
-    </div>
-    <div class="choices"><button id="close">閉じる</button></div>`;
-  ($('close') as HTMLButtonElement).onclick = () => { $('modal').classList.add('hidden'); render(); };
   $('modal').classList.remove('hidden');
 }
 
